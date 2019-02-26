@@ -6,6 +6,9 @@ Code for the Booth Machine Learning Winter 2019 class
 - Can we predict tip?
 - Clustering for driver/rider behavior?
 - Identifying suspicious behavior like systematically "broken" meters
+- [Dave 2/26/2019] Can we identify taxi IDs that are less likely to drop off at certain Community Areas?
+    - Thought this might be interesting to look at. It's illegal for a driver to turn down a fare just based on the customer's destination, but it definitely happens. We may be able to see drivers who systematically have less drop-offs in bad areas.
+
 
 ### Helpful links
 - [Markdown Guide](https://www.markdownguide.org/)
