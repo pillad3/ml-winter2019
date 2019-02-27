@@ -25,10 +25,10 @@ knitr::opts_chunk$set(echo = TRUE,
                       digits = 3) 
 ```
 
-```{r,echo=FALSE,results='hide'}
+```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 
-PackageList =c("dplyr","tidyverse")
+PackageList =c("dplyr","tidyverse","lubridate","censusapi","plyr")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -42,16 +42,51 @@ Load data and begin generating exploratory plots.
 
 ```{r}
 source("taxiData.R")
+#Load records from taxi data
 data1m <- taxiData(100000)
 data1mDF <- data.frame(data1m$rawData)
+data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
+#Load census data by Chicago Community Area
+ccaData <- read.csv("ChicagoCCAData.csv")
+ccaData$CCA.Code<-as.factor(tempDF$CCA.Code)
+ccaData$GEOG<-as.factor(tempDF$GEOG)
+#Lookup name of pickup CCA and add
+df<- data1mDF %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'GEOG'] <- 'pickup_area'
+#Lookup name of dropoff CCA and add
+df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
 ```
 
-Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter.
+Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
+
+We add factors for the Start Date (as opposed to date time) and End Date.
 ```{r}
-data1mDF$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
+df$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
+df$startDate<-date(data1mDF$trip_start_timestamp)
+df$endDate<-date(data1mDF$trip_end_timestamp)
+df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
+#Add Area name by CCA Region for Dropoff/Pickup
 
-data1mDF %>% group_by(company) %>% tally(sort=TRUE)
+#Trips by Company
+df %>% group_by(company) %>% tally(sort=TRUE)
+
+#Trips by Dropoff Area
+df %>% group_by(GEOG) %>% tally(sort=TRUE)
+#Trips by Pickup Area
+df %>% group_by(GEOG) %>% tally(sort=TRUE)
 ```
+
+Add column for date
+```{r}
+
+data1mDF %>% group_by(month=floor_date(trip_start_timestamp, "month")) %>%
+   summarize(amount=sum(fare))
+```
+
+
+
+
 ```{r}
 
 ggplot(data = data1mDF) +
@@ -63,11 +98,14 @@ ggplot(data = data1mDF) +
 ggplot(data = data1mDF) +
   geom_bar(mapping = aes(x = company))
 
+ggplot(data = data1mDF, aes(x = trip_start_timestamp)) + 
+ geom_density(fill = "blue")
+
 ```
 
 ```{r}
 orderedFares<-data1mDF$fare[order(data1mDF$fare,decreasing = TRUE)]
-hist(orderedFares,breaks=c(1,10,100,1000),xlim=c(0,100))
+
 boxplot(orderedFares[10:length(orderedFares)])
 ```
 
