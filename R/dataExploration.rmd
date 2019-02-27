@@ -27,8 +27,8 @@ knitr::opts_chunk$set(echo = TRUE,
 
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
-
-PackageList =c("dplyr","tidyverse","lubridate","censusapi","plyr")
+#Note: Be sure plyr is loaded before dplyr
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -45,6 +45,9 @@ source("taxiData.R")
 #Load records from taxi data
 data1m <- taxiData(100000)
 data1mDF <- data.frame(data1m$rawData)
+#Replace <NA> with string "NA" which can be used for grouping
+
+
 data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
@@ -56,29 +59,41 @@ names(df)[names(df) == 'GEOG'] <- 'pickup_area'
 #Lookup name of dropoff CCA and add
 df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
+
+df$dropoff_area <- fct_explicit_na(df$dropoff_area,"NA")
+df$pickup_area <- fct_explicit_na(df$pickup_area,"NA")
+df$company <- fct_explicit_na(df$company,"NA")
 ```
 
 Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
-
-We add factors for the Start Date (as opposed to date time) and End Date.
+We add factors for the Start Date (as opposed to date time), End Date, and Start Day of Week.
 ```{r}
 df$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
 df$startDate<-date(data1mDF$trip_start_timestamp)
 df$endDate<-date(data1mDF$trip_end_timestamp)
 df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
-#Add Area name by CCA Region for Dropoff/Pickup
-
-#Trips by Company
-df %>% group_by(company) %>% tally(sort=TRUE)
-
-#Trips by Dropoff Area
-df %>% group_by(dropoff_area) %>% tally(sort=TRUE)
-#Trips by Pickup Area
-df %>% group_by(pickup_area) %>% tally(sort=TRUE)
-
-#Trips by Pickup Area
-df %>% group_by(pickup_area) %>% summarize(total_fare = sum(fare,na.rm=TRUE),mean=mean(fare,na.rm=TRUE))
 ```
+
+## Start Summary Tables
+```{r}
+#Note: I am calling dplyr's functions directly to avoid issues with summarize
+#Trips by Company
+df %>% dplyr::group_by(company) %>% tally(sort=TRUE)
+#Trips by Dropoff Area
+df %>% dplyr::group_by(dropoff_area) %>% tally(sort=TRUE)
+#Trips by Origination and Destination
+df %>% dplyr::group_by(pickup_area,dropoff_area) %>% tally(sort=TRUE)
+#Trips by Pickup Area
+df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
+#Avg Fare and Distance by Pickup Area
+df %>% dplyr::group_by(pickup_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
+#Avg Fare and Distance by Dropoff Area
+df %>% dplyr::group_by(dropoff_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
+#Avg Fare and Distance by Pickup and Dropoff Areas
+df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
+```
+
+
 
 Add column for date
 ```{r}
