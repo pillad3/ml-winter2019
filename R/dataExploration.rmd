@@ -48,8 +48,8 @@ data1mDF <- data.frame(data1m$rawData)
 data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
-ccaData$CCA.Code<-as.factor(tempDF$CCA.Code)
-ccaData$GEOG<-as.factor(tempDF$GEOG)
+ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
+ccaData$GEOG<-as.factor(ccaData$GEOG)
 #Lookup name of pickup CCA and add
 df<- data1mDF %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'pickup_area'
@@ -72,9 +72,12 @@ df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
 df %>% group_by(company) %>% tally(sort=TRUE)
 
 #Trips by Dropoff Area
-df %>% group_by(GEOG) %>% tally(sort=TRUE)
+df %>% group_by(dropoff_area) %>% tally(sort=TRUE)
 #Trips by Pickup Area
-df %>% group_by(GEOG) %>% tally(sort=TRUE)
+df %>% group_by(pickup_area) %>% tally(sort=TRUE)
+
+#Trips by Pickup Area
+df %>% group_by(pickup_area) %>% summarize(total_fare = sum(fare,na.rm=TRUE),mean=mean(fare,na.rm=TRUE))
 ```
 
 Add column for date
