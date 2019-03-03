@@ -43,9 +43,9 @@ Load data and begin generating exploratory plots.
 ```{r}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(500000)
+data1m <- taxiData(100000)
 data1mDF <- data.frame(data1m$rawData)
-#Replace <NA> with string "NA" which can be used for grouping
+
 data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
@@ -57,10 +57,7 @@ names(df)[names(df) == 'GEOG'] <- 'pickup_area'
 #Look up name of dropoff CCA and add to df
 df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
-#Convert <NA> values to NA for any string fields to be used in summarize()
-df$dropoff_area <- fct_explicit_na(df$dropoff_area,"NA")
-df$pickup_area <- fct_explicit_na(df$pickup_area,"NA")
-df$company <- fct_explicit_na(df$company,"NA")
+
 ```
 Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
 We add factors for the Start Date (as opposed to date time), End Date, and Start Day of Week.
@@ -68,12 +65,22 @@ We add factors for the Start Date (as opposed to date time), End Date, and Start
 * Add factor for Start Date (not date time)
 * Add factor for End Date (not date time)
 * Add factor for start day of the week
+
 ```{r}
 df$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
 df$startDate<-date(data1mDF$trip_start_timestamp)
 df$endDate<-date(data1mDF$trip_end_timestamp)
 df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
 ```
+
+Throw out all rows where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
+
+```{r}
+#Replace <NA> with string "NA" which can be used for grouping
+#df<-df %>% drop_na(c("dropoff_area","pickup_area"))
+df$company <- fct_explicit_na(df$company,"NA")
+```
+
 
 ## Start Summary Tables
 
@@ -114,9 +121,18 @@ df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trip
 
 Add column for date
 ```{r}
+fareByMonth <- df %>% group_by(month=floor_date(df$startDate, "month")) %>%
+   summarize(sum(fare))
+ridesByMonth <- df %>% group_by(month=floor_date(df$startDate, "month")) %>%
+   tally(sort=TRUE)
+```
 
-data1mDF %>% group_by(month=floor_date(trip_start_timestamp, "month")) %>%
-   summarize(amount=sum(fare))
+
+```{r}
+plot(ridesByMonth$month,ridesByMonth$n)
+```
+```{r}
+plot(fareByMonth$month,fareByMonth$totalFares)
 ```
 
 
@@ -124,23 +140,23 @@ data1mDF %>% group_by(month=floor_date(trip_start_timestamp, "month")) %>%
 
 ```{r}
 
-ggplot(data = data1mDF) +
-  geom_histogram(mapping = aes(x = fare), binwidth = 5)
+#ggplot(data = data1mDF) +
+#  geom_histogram(mapping = aes(x = fare), binwidth = 5)
 
-ggplot(data = data1mDF) +
-  geom_bar(mapping = aes(x = company))
+#ggplot(data = data1mDF) +
+#  geom_bar(mapping = aes(x = company))
 
-ggplot(data = data1mDF) +
-  geom_bar(mapping = aes(x = company))
+#ggplot(data = data1mDF) +
+#  geom_bar(mapping = aes(x = company))
 
-ggplot(data = data1mDF, aes(x = trip_start_timestamp)) + 
- geom_density(fill = "blue")
+#ggplot(data = data1mDF, aes(x = trip_start_timestamp)) + 
+# geom_density(fill = "blue")
 
 ```
 
 ```{r}
-orderedFares<-data1mDF$fare[order(data1mDF$fare,decreasing = TRUE)]
+#orderedFares<-data1mDF$fare[order(data1mDF$fare,decreasing = TRUE)]
 
-boxplot(orderedFares[10:length(orderedFares)])
+#boxplot(orderedFares[10:length(orderedFares)])
 ```
 
