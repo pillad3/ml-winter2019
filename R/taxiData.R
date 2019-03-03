@@ -6,12 +6,12 @@ taxiData <- function(n) {
   for (i in 0:(batches-1)) {
     dataOffset <- i*limit
     
-    url <- paste0("https://data.cityofchicago.org/resource/wrvz-psew.json?",
-                  "$limit=", limit, "&",
-                  "$offset=", dataOffset, "&",
+    url <- paste0("http://data.cityofchicago.org/resource/wrvz-psew.json?",
+                  "$limit=", as.integer(limit), "&",
+                  "$offset=", as.integer(dataOffset), "&",
                   "$order=:id")
     cat(url, "\n")
-    json <- jsonlite::fromJSON(url, flatten = TRUE)
+    json <- jsonlite::fromJSON(URLencode(url), flatten = TRUE)
     rownames(json) <- as.numeric(rownames(json)) + dataOffset
     rawData <- rbind(rawData, json)
   }

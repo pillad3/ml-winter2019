@@ -42,31 +42,32 @@ Load data and begin generating exploratory plots.
 
 ```{r}
 source("taxiData.R")
-#Load records from taxi data
-data1m <- taxiData(100000)
+#Load records from taxi data source and store as a dataframe
+data1m <- taxiData(500000)
 data1mDF <- data.frame(data1m$rawData)
 #Replace <NA> with string "NA" which can be used for grouping
-
-
 data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
-#Lookup name of pickup CCA and add
+#Look up name of pickup CCA and add to df
 df<- data1mDF %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'pickup_area'
-#Lookup name of dropoff CCA and add
+#Look up name of dropoff CCA and add to df
 df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
-
+#Convert <NA> values to NA for any string fields to be used in summarize()
 df$dropoff_area <- fct_explicit_na(df$dropoff_area,"NA")
 df$pickup_area <- fct_explicit_na(df$pickup_area,"NA")
 df$company <- fct_explicit_na(df$company,"NA")
 ```
-
 Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
 We add factors for the Start Date (as opposed to date time), End Date, and Start Day of Week.
+* In company, set "Chicago Elite Cab Corp. (Chicago Carriag" equal to "Chicago Elite Cab Corp."
+* Add factor for Start Date (not date time)
+* Add factor for End Date (not date time)
+* Add factor for start day of the week
 ```{r}
 df$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
 df$startDate<-date(data1mDF$trip_start_timestamp)
@@ -75,6 +76,13 @@ df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
 ```
 
 ## Start Summary Tables
+
+Create summary tables
+* Ride count by Company
+* Ride count by Dropoff Area
+* Ride count by Pickup Area
+* Rice count, avg fare, avg distance by pickup area
+* Rice count, avg fare, avg distance by dropoffS area
 ```{r}
 #Note: I am calling dplyr's functions directly to avoid issues with summarize
 #Trips by Company
@@ -90,7 +98,16 @@ df %>% dplyr::group_by(pickup_area) %>% dplyr::summarize(total_trips=n(),mean_fa
 #Avg Fare and Distance by Dropoff Area
 df %>% dplyr::group_by(dropoff_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
 #Avg Fare and Distance by Pickup and Dropoff Areas
-df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
+df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),
+  mean_fare = round(mean(fare,na.rm=TRUE),2),
+  median_fare = round(median(fare,na.rm=TRUE),2),
+  min_fare=round(min(fare,na.rm=TRUE),2),
+  max_fare=round(max(fare,na.rm=TRUE),2),
+  mean_distance=round(mean(trip_miles,na.rm=TRUE),1),
+  median_distance=round(median(trip_miles,na.rm=TRUE),1),
+  min_distance=round(min(trip_miles,na.rm=TRUE),1),
+  max_distance=round(max(trip_miles,na.rm=TRUE),1)
+  )  %>% arrange(desc(mean_fare))
 ```
 
 
