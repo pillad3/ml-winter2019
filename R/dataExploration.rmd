@@ -45,7 +45,7 @@ source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
 data1m <- taxiData(100000)
 data1mDF <- data.frame(data1m$rawData)
-
+rm(data1m) #Drop old data
 data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
@@ -71,6 +71,7 @@ df$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chi
 df$startDate<-date(data1mDF$trip_start_timestamp)
 df$endDate<-date(data1mDF$trip_end_timestamp)
 df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
+df$endMonth
 ```
 
 Throw out all rows where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
@@ -119,22 +120,21 @@ df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trip
 
 
 
-Add column for date
+Generate summary calculations by month/year
 ```{r}
-fareByMonth <- df %>% group_by(month=floor_date(df$startDate, "month")) %>%
-   summarize(sum(fare))
-ridesByMonth <- df %>% group_by(month=floor_date(df$startDate, "month")) %>%
-   tally(sort=TRUE)
+fareByMonthYear <- df %>% dplyr::group_by(month=floor_date(df$startDate, "month")) %>%
+   summarize(totalFares=sum(fare))
+ridesByMonthYear <- df %>% dplyr::group_by(month=floor_date(df$startDate, "month")) %>%
+   tally(sort=FALSE)
 ```
 
-
+Plot Total Fares paid in Chicago as a functon of Month
 ```{r}
-plot(ridesByMonth$month,ridesByMonth$n)
+plot(x=fareByMonthYear$month,y=fareByMonthYear$totalFares,main="Total Cab Fares by Month/Year")
 ```
 ```{r}
-plot(fareByMonth$month,fareByMonth$totalFares)
+plot(x=ridesByMonthYear$month,y=ridesByMonthYear$n,main="Number of Cab Rides by Month/Year")
 ```
-
 
 
 
