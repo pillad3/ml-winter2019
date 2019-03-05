@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(200000)
+data1m <- taxiData(1000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -115,6 +115,46 @@ cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data.
 #rm(df)
 #gc()
 ```
+
+# Clustering
+
+One hypothesis is that there are different subsets of riders which we may be able to identify based upon:
+* pickup location
+* dropoff location
+* pickup area demographic attributes
+* time of ride
+* day of ride
+
+We will use k-means clustering to see how many unique sets of riders may exist in Chicago. We will first copy our dataframe into a new df that has been rescaled.
+
+```{r}
+colsToUse=c("company","extras","fare","payment_type","tips","tolls","trip_miles","trip_seconds","trip_total","pickup_area","dropoff_area","Pop16Plus","IN_LBFRC","UNEMP","MedIncome","startDate","endDate","endDay","endMonth","endHour","LaborPart","pickup_area","dropoff_area")
+#Drop any row containing NA in any column
+dfTree <- df[,colsToUse]
+dfTree <- dfTree[complete.cases(dfTree),]
+
+set.seed(1)
+
+nSample <- floor(0.75*nrow(dfTree))
+train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
+
+trainSample <- dfTree[train_ind,] #drop the final redundant dummy var for target_control
+validateSample <- dfTree[-train_ind,]
+
+```
+We will construct a big tree to start.
+```{r}
+big.tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=1000,cp=0.001,xval=10))
+nbig = length(unique(big.tree$where)) 
+
+cat('size of big tree: ',nbig,'\n')
+
+bestcp = big.tree$cptable[which.min(big.tree$cptable[,"xerror"]), "CP" ] 
+bestcp
+
+plotcp(big.tree) 
+```
+
 
 Build a logistic regression model to predict fare
 ```{r, "Specify train/validation data"}
