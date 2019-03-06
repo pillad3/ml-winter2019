@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(1000000)
+data1m <- taxiData(500000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -51,27 +51,29 @@ df$dropoff_community_area<-as.factor(df$dropoff_community_area)
 df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_location.coordinates)
 df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
 df$trip_total<-as.numeric(df$trip_total)
+df$extras<-as.numeric(df$extras)
+df$tolls<-as.numeric(df$tolls)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
 #Look up name of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+df<- df %>% left_join(dplyr::select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'pickup_area'
 #Look up name of dropoff CCA and add to df
-df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+df<- df %>% left_join(dplyr::select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
 #Look up population>16yo of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,POP_16OV,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+df<- df %>% left_join(dplyr::select(ccaData,POP_16OV,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'POP_16OV'] <- 'Pop16Plus'
 #Look up Labor Force of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,IN_LBFRC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+df<- df %>% left_join(dplyr::select(ccaData,IN_LBFRC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'IN_LBFRC'] <- 'IN_LBFRC'
 #Look up Unemp of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,UNEMP,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+df<- df %>% left_join(dplyr::select(ccaData,UNEMP,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'UNEMP'] <- 'UNEMP'
 #Look up Unemp of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+df<- df %>% left_join(dplyr::select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'MEDINC'] <- 'MedIncome'
 ```
 Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
@@ -116,7 +118,7 @@ cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data.
 #gc()
 ```
 
-# Clustering
+# Trees
 
 One hypothesis is that there are different subsets of riders which we may be able to identify based upon:
 * pickup location
@@ -125,7 +127,7 @@ One hypothesis is that there are different subsets of riders which we may be abl
 * time of ride
 * day of ride
 
-We will use k-means clustering to see how many unique sets of riders may exist in Chicago. We will first copy our dataframe into a new df that has been rescaled.
+We will use tree-based models to model tips as well as fares
 
 ```{r}
 colsToUse=c("company","extras","fare","payment_type","tips","tolls","trip_miles","trip_seconds","trip_total","pickup_area","dropoff_area","Pop16Plus","IN_LBFRC","UNEMP","MedIncome","startDate","endDate","endDay","endMonth","endHour","LaborPart","pickup_area","dropoff_area")
@@ -140,23 +142,48 @@ train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
 
 trainSample <- dfTree[train_ind,] #drop the final redundant dummy var for target_control
 validateSample <- dfTree[-train_ind,]
-
 ```
 We will construct a big tree to start.
 ```{r}
-big.tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=1000,cp=0.001,xval=10))
-nbig = length(unique(big.tree$where)) 
+big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=100,cp=0.00001,xval=10))
+nbig = length(unique(big_tree$where)) 
 
 cat('size of big tree: ',nbig,'\n')
 
-bestcp = big.tree$cptable[which.min(big.tree$cptable[,"xerror"]), "CP" ] 
-bestcp
+cptable = printcp(big_tree)
+# this is the cp parameter with smallest cv-errror
+(index_cp_min = which.min(cptable[,"xerror"]))
+(cp_min = cptable[ index_cp_min, "CP" ])   
 
-plotcp(big.tree) 
+(val_h = cptable[index_cp_min, "xerror"] + cptable[index_cp_min, "xstd"])
+(index_cp_std = Position(function(x) x < val_h, cptable[, "xerror"]))
+(cp_std = cptable[ index_cp_std, "CP" ])   
 ```
 
 
-Build a logistic regression model to predict fare
+
+We then prune back this big tree for a range of different CP, calculating the misclassification rate and loss as a function of tree size for both our training and validation data.
+```{r}
+cpvec = big_tree$cptable[,"CP"]
+ntree = length(cpvec)
+tree_size = rep(0,ntree)
+
+errorTrain=rep(0,ntree)
+errorValidate=rep(0,ntree)
+
+for(i in 1:ntree) {
+  temptree = prune(big_tree,cp=cpvec[i])
+  tree_size[i] = length(unique(temptree$where))
+ 
+  errorTrain[i]=sqrt(mean((predict(temptree,newdata=trainSample)-trainSample$tips)^2))
+  errorValidate[i]=sqrt(mean((predict(temptree,newdata=validateSample)-validateSample$tips)^2))
+}
+
+ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) +  geom_line(aes(x=tree_size,y=errorTrain,color="train"))+  scale_colour_manual(breaks = c("Validate"="blue", "Train"="green"),values = c("blue", "green")) + ggtitle("Tree Performance")+xlab("Tree Size")+ylab("RMSE")
+
+```
+
+This indicates that the tip predictions from an 80-node tree are roughly ~$0.60 per trip.
 ```{r, "Specify train/validation data"}
 #split sample into training and testing
 n = nrow(dfSlim)
