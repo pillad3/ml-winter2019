@@ -2,20 +2,50 @@ taxiData <- function(n) {
   limit <- 50000
   batches <- ceiling(n/limit)
   rawData <- data.frame()
+  dataFolder <- normalizePath("../Data/")
+  
+  # Create the cache folder if it doesn't exist
+  if (!dir.exists(dataFolder)) {
+    dir.create(dataFolder)
+  }
   
   for (i in 0:(batches-1)) {
+    dataFile <- paste0(dataFolder, "/taxiData_", i, ".json")
     dataOffset <- i*limit
     
-    url <- paste0("http://data.cityofchicago.org/resource/wrvz-psew.json?",
-                  "$limit=", as.integer(limit), "&",
-                  "$offset=", as.integer(dataOffset), "&",
-                  "$order=:id")
-    cat(url, "\n")
-    json <- jsonlite::fromJSON(URLencode(url), flatten = TRUE)
+    # Fetch the data from the website if we don't have a cached version
+    if (!file.exists(dataFile)) {
+      
+      # Build the URL
+      dataUri <- paste0("http://data.cityofchicago.org/resource/wrvz-psew.json?",
+                    "$limit=", as.integer(limit), "&",
+                    "$offset=", as.integer(dataOffset), "&",
+                    "$order=:id")
+      
+      # Load the data and close the connection
+      urlCxn <- url(dataUri)
+      batchStr <- readLines(urlCxn)
+      close(urlCxn)
+      
+      # Write the data to the cache
+      fileCxn <- file(dataFile)
+      writeLines(batchStr, fileCxn)
+      close(fileCxn)
+    }
+    # Use the cache version if it exists
+    else {
+      fileCxn <- file(dataFile)
+      batchStr <- readLines(fileCxn)
+      close(fileCxn)
+    }
+    
+    # Load the JSON into the data frame
+    json <- jsonlite::fromJSON(batchStr, flatten = TRUE)
     rownames(json) <- as.numeric(rownames(json)) + dataOffset
     rawData <- rbind(rawData, json)
   }
   
+  # Clean the data types and make it a tibble
   rawData = tibble::as_tibble(rawData) %>%
     mutate(
       company = as.factor(company),

@@ -28,8 +28,6 @@ vignettes/*.pdf
 /*_cache/
 /R/*_cache/
 /cache/
-/R/*_files/
-
 
 # Temporary files created by R markdown
 *.utf8.md
@@ -41,3 +39,6 @@ rsconnect/
 
 # README preview
 README.html
+
+# Data caches
+/Data/
