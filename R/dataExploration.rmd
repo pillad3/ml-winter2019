@@ -12,7 +12,7 @@ fig_width: 6
 fig_height: 4
 ---
   
-  ```{r setup, include=FALSE}
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, 
                       #include = TRUE, 
                       eval = TRUE, 
@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(5000000)
+data1m <- taxiData(1000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 df$dropoff_community_area<-as.factor(df$dropoff_community_area)
@@ -97,7 +97,7 @@ Throw out all rows where NAs exist for dropoff/pickup location and convert NA to
 
 ```{r}
 #Uncomment the following line to drop all records where dropoff_area and pickup_area NA
-#df<-df %>% drop_na(c("dropoff_area","pickup_area"))
+df<-df %>% drop_na(c("dropoff_area","pickup_area"))
 #Replace <NA> with string "NA" which can be used for grouping
 df$company <- fct_explicit_na(df$company,"NA")
 ```
@@ -242,7 +242,7 @@ tipStatsByTaxi <- df %>% drop_na(c("tips")) %>% dplyr::group_by(taxi=taxi_id) %>
 tipStatsByTaxi
 ```{r}
 tipStatsByPickup <- df %>% drop_na(c("tips","trip_seconds","pickup_area")) %>% dplyr::group_by(pickup_area) %>% 
-   filter(n()>1000) %>% filter(trip_seconds>0)  %>%
+   filter(n()>100) %>% filter(trip_seconds>0)  %>%
    summarize(AvgTip=round(mean(tips),2),
              AvgTipPerMin=round(mean(tips/(trip_seconds/60)),2),
              MedianTip=median(tips),
