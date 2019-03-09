@@ -145,7 +145,7 @@ validateSample <- dfTree[-train_ind,]
 ```
 We will construct a big tree to start.
 ```{r}
-big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=100,cp=0.00001,xval=10))
+big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=10,cp=0.00001,xval=10))
 nbig = length(unique(big_tree$where)) 
 
 cat('size of big tree: ',nbig,'\n')
@@ -181,6 +181,7 @@ for(i in 1:ntree) {
 
 ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) +  geom_line(aes(x=tree_size,y=errorTrain,color="train"))+  scale_colour_manual(breaks = c("Validate"="blue", "Train"="green"),values = c("blue", "green")) + ggtitle("Tree Performance")+xlab("Tree Size")+ylab("RMSE")
 
+plotcp(big_tree,upper="size")
 ```
 
 This indicates that the tip predictions from an 80-node tree are roughly ~$0.60 per trip.
