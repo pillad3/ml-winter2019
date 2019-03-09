@@ -1,0 +1,11 @@
+---
+title: "Final Writeup"
+author: ""
+date: "2019-Mar-22"
+output: pdf_document
+---
+
+## Data exploration
+
+```{r, child='dataExploration.rmd'}
+```
