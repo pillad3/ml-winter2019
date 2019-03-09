@@ -12,6 +12,7 @@ taxiData <- function(n) {
   for (i in 0:(batches-1)) {
     dataFile <- paste0(dataFolder, "/taxiData_", i, ".json")
     dataOffset <- i*limit
+    message(paste0("Loading batch ", i+1, " of ", batches))
     
     # Fetch the data from the website if we don't have a cached version
     if (!file.exists(dataFile)) {
