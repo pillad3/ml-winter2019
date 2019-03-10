@@ -1,4 +1,4 @@
-taxiData <- function(numberOfRows, startIndex = 0) {
+taxiData <- function(numberOfRows, startIndex = 0, cleanData = TRUE) {
   dataFolder <- "../Data"
   dataFile <- paste0(dataFolder, "/taxiData.rds")
   
@@ -65,20 +65,22 @@ taxiData <- function(numberOfRows, startIndex = 0) {
     rawData <- rbind(rawData, json)
   }
   
-  # Clean the data types and make it a tibble
-  rawData = tibble::as_tibble(rawData) %>%
-    mutate(
-      company = as.factor(company),
-      pickup_community_area = as.factor(pickup_community_area),
-      dropoff_community_area = as.factor(dropoff_community_area),
-      payment_type = as.factor(payment_type),
-      taxi_id = as.factor(taxi_id),
-      trip_id = as.factor(trip_id),
-      trip_miles = as.numeric(trip_miles),
-      trip_seconds = as.numeric(trip_seconds),
-      tips = as.numeric(tips),
-      fare = as.numeric(fare)
-    )
+  if (cleanData) {
+    # Clean the data types and make it a tibble
+    rawData = tibble::as_tibble(rawData) %>%
+      mutate(
+        company = as.factor(company),
+        pickup_community_area = as.factor(pickup_community_area),
+        dropoff_community_area = as.factor(dropoff_community_area),
+        payment_type = as.factor(payment_type),
+        taxi_id = as.factor(taxi_id),
+        trip_id = as.factor(trip_id),
+        trip_miles = as.numeric(trip_miles),
+        trip_seconds = as.numeric(trip_seconds),
+        tips = as.numeric(tips),
+        fare = as.numeric(fare)
+      )
+  }
   
   data <- list(
     rawData=rawData,
