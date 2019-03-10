@@ -12,7 +12,7 @@ fig_width: 6
 fig_height: 4
 ---
   
-  ```{r setup, include=FALSE}
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, 
                       #include = TRUE, 
                       eval = TRUE, 
@@ -43,44 +43,64 @@ Load data and begin generating exploratory plots.
 ```{r}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(100000)
-data1mDF <- data.frame(data1m$rawData)
-
-data1mDF$dropoff_community_area<-as.factor(data1mDF$dropoff_community_area)
+data1m <- taxiData(1000000)
+df <- data.frame(data1m$rawData)
+rm(data1m) #Drop old data
+df$dropoff_community_area<-as.factor(df$dropoff_community_area)
+df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_location.coordinates)
+df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
+df$trip_total<-as.numeric(df$trip_total)
 #Load census data by Chicago Community Area
 ccaData <- read.csv("ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
 #Look up name of pickup CCA and add to df
-df<- data1mDF %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'pickup_area'
 #Look up name of dropoff CCA and add to df
 df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
 names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
-
+#Look up population>16yo of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,POP_16OV,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'POP_16OV'] <- 'Pop16Plus'
+#Look up Labor Force of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,IN_LBFRC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'IN_LBFRC'] <- 'IN_LBFRC'
+#Look up Unemp of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,UNEMP,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'UNEMP'] <- 'UNEMP'
+#Look up Unemp of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'MEDINC'] <- 'MedIncome'
 ```
+
+
 Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
 We add factors for the Start Date (as opposed to date time), End Date, and Start Day of Week.
 * In company, set "Chicago Elite Cab Corp. (Chicago Carriag" equal to "Chicago Elite Cab Corp."
 * Add factor for Start Date (not date time)
 * Add factor for End Date (not date time)
-* Add factor for start day of the week
+* Add factor for End Day of week
+* Add factor for End month
+* Add factor for End hour
 
 ```{r}
-df$company[data1mDF$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
-df$startDate<-date(data1mDF$trip_start_timestamp)
-df$endDate<-date(data1mDF$trip_end_timestamp)
-df$endDay<-wday(data1mDF$trip_end_timestamp,label=TRUE)
+df$company[df$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
+df$startDate <- date(df$trip_start_timestamp)
+df$endDate <- date(df$trip_end_timestamp)
+df$endDay <- wday(df$trip_end_timestamp,label=TRUE)
+df$endMonth <- month(df$trip_end_timestamp,label=TRUE)
+df$endHour <- hour(str_replace(df$trip_end_timestamp,"T"," "))
 ```
 
 Throw out all rows where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
 
 ```{r}
+#Uncomment the following line to drop all records where dropoff_area and pickup_area NA
+df<-df %>% drop_na(c("dropoff_area","pickup_area"))
 #Replace <NA> with string "NA" which can be used for grouping
-#df<-df %>% drop_na(c("dropoff_area","pickup_area"))
 df$company <- fct_explicit_na(df$company,"NA")
 ```
-
 
 ## Start Summary Tables
 
@@ -95,11 +115,13 @@ Create summary tables
 #Trips by Company
 df %>% dplyr::group_by(company) %>% tally(sort=TRUE)
 #Trips by Dropoff Area
-df %>% dplyr::group_by(dropoff_area) %>% tally(sort=TRUE)
+topDrop <- df %>% dplyr::group_by(dropoff_area) %>% tally(sort=TRUE)
+topDrop
 #Trips by Origination and Destination
 df %>% dplyr::group_by(pickup_area,dropoff_area) %>% tally(sort=TRUE)
 #Trips by Pickup Area
-df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
+topPickup <- df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
+topPickup
 #Avg Fare and Distance by Pickup Area
 df %>% dplyr::group_by(pickup_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
 #Avg Fare and Distance by Dropoff Area
@@ -118,45 +140,117 @@ df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trip
 ```
 
 
-
-Add column for date
-```{r}
-fareByMonth <- df %>% group_by(month=floor_date(df$startDate, "month")) %>%
-   summarize(sum(fare))
-ridesByMonth <- df %>% group_by(month=floor_date(df$startDate, "month")) %>%
-   tally(sort=TRUE)
-```
-
+Generate summary calculations by month/year and plot.
 
 ```{r}
-plot(ridesByMonth$month,ridesByMonth$n)
-```
-```{r}
-plot(fareByMonth$month,fareByMonth$totalFares)
-```
-
-
-
-
-```{r}
-
-#ggplot(data = data1mDF) +
-#  geom_histogram(mapping = aes(x = fare), binwidth = 5)
-
-#ggplot(data = data1mDF) +
-#  geom_bar(mapping = aes(x = company))
-
-#ggplot(data = data1mDF) +
-#  geom_bar(mapping = aes(x = company))
-
-#ggplot(data = data1mDF, aes(x = trip_start_timestamp)) + 
-# geom_density(fill = "blue")
-
+fareByMonthYear <- df %>% drop_na(c("startDate","fare")) %>% filter(fare<1000) %>% 
+  dplyr::group_by(month=floor_date(startDate, "month")) %>%
+   filter(month!="2016-10-01") %>% summarize(totalFares=sum(fare))
+ggplot(fareByMonthYear, aes(x=month, y=totalFares, group=1))+
+  geom_point()+geom_line()+ggtitle("Total Cab Fares in Chicago by Month/Year")+xlab("Month/Year")+ylab("Fares Paid within Chicago ($)")
 ```
 
 ```{r}
-#orderedFares<-data1mDF$fare[order(data1mDF$fare,decreasing = TRUE)]
-
-#boxplot(orderedFares[10:length(orderedFares)])
+#Drop all NA on-the-fly
+fareByMonth <- df %>% drop_na(c("startDate","fare")) %>%  filter(year(endDate)!='2016') %>% filter(fare<1000) %>% 
+  dplyr::group_by(month=endMonth)  %>% summarize(total=sum(fare))
+ggplot(fareByMonth, aes(x=month, y=total, group=1))+
+  geom_point(size=3)+geom_line(size=1.25)+ggtitle("Total Cab Fares in Chicago by Calendar Month")+xlab("Calendar Month")+ylab("Total Fare ($)")
 ```
 
+```{r}
+#Throw out 10/2016 because zero rides
+ridesByMonthYear <- df %>% dplyr::group_by(month=floor_date(df$startDate, "month")) %>% 
+   filter(month!="2016-10-01") %>% tally(sort=TRUE)
+ggplot(ridesByMonthYear, aes(x=month, y=n, group=1))+
+  geom_point()+geom_line()+ggtitle("Number of Cab Rides by Month/Year")+xlab("Month/Year")+ylab("Rides")
+```
+
+Let's look at the total number of cab rides by calendar month. Since we only have data for the first 9 months of 2016, we drop all 2016 data to avoid introducing a bias in the trend.
+
+```{r}
+#Drop all NA on-the-fly
+ridesByMonth <- df %>% drop_na(c("endMonth")) %>%  filter(year(endDate)!='2016') %>% 
+  dplyr::group_by(month=endMonth)  %>%summarize(total=sum(!is.na(endMonth)))
+ggplot(ridesByMonth, aes(x=month, y=total, group=1))+
+  geom_point(size=3)+geom_line(size=1.25)+ggtitle("Number of Cab Rides by Calendar Month")+xlab("Calendar Month")+ylab("Rides")
+```
+```{r}
+#Drop all NA on-the-fly
+ridesByWeekday<- df %>% drop_na(c("endDay")) %>% dplyr::group_by(weekday=endDay) %>%
+   summarize(total=sum(!is.na(endDay)))
+ggplot(ridesByWeekday, aes(x=weekday, y=total, group=1))+
+  geom_point(size=4)+geom_line(size=1.25)+ggtitle("Number of Cab Rides by Weekday")+xlab("Weekday")+ylab("Rides")
+```
+
+```{r}
+#Drop all NA on-the-fly
+fareByWeekday<- df %>% drop_na(c("endDay","fare")) %>% dplyr::group_by(weekday=endDay) %>%  filter(fare<1000) %>% 
+   summarize(total=sum(fare))
+ggplot(fareByWeekday, aes(x=weekday, y=total, group=1))+
+  geom_point(size=4)+geom_line(size=1.25)+ggtitle("Total Fare by Weekday")+xlab("Weekday")+ylab("Fare ($)")
+```
+
+```{r}
+#Drop all NA on-the-fly
+avgFareByWeekday<- df %>% drop_na(c("endDay","fare")) %>% dplyr::group_by(weekday=endDay) %>%  filter(fare<1000) %>% 
+   summarize(mean=mean(fare))
+ggplot(avgFareByWeekday, aes(x=weekday, y=mean, group=1))+
+  geom_point(size=4)+geom_line(size=1.25)+ggtitle("Avg Fare by Weekday")+xlab("Weekday")+ylab("Fare ($)")
+```
+
+```{r}
+#Drop all NA on-the-fly
+avgDistanceByWeekday<- df %>% drop_na(c("endDay","trip_miles")) %>% dplyr::group_by(weekday=endDay) %>%  filter(trip_miles<1000) %>% 
+   summarize(mean=mean(trip_miles))
+ggplot(avgDistanceByWeekday, aes(x=weekday, y=mean, group=1))+
+  geom_point(size=4)+geom_line(size=1.25)+ggtitle("Avg Trip Distance by Weekday")+xlab("Weekday")+ylab("Distance (miles)")
+```
+
+## Statistics by Taxi Medallion
+```{r}
+#Throw out 10/2016 because zero rides
+taxisByMonth <- df %>% dplyr::group_by(month=floor_date(df$startDate, "month")) %>% 
+   filter(month!="2016-10-01") %>% summarize(cabs=n_distinct(taxi_id))
+ggplot(taxisByMonth, aes(x=month, y=cabs, group=1))+
+  geom_point()+geom_line()+ggtitle("Number of Taxis Operating by Month/Year")+xlab("Month/Year")+ylab("Taxis")
+```
+
+```{r}
+#Throw out 10/2016 because zero rides
+fareStatsByTaxi <- df %>% dplyr::group_by(taxi=taxi_id) %>% filter(fare<500 & fare>=2.25) %>%
+   summarize(AvgFare=mean(fare),MedianFare=median(fare),MaxFare=max(fare),Trips=n())%>% arrange(desc(Trips))
+fareStatsByTaxi
+ggplot(fareStatsByTaxi, aes(x=Trips, y=MedianFare, group=1))+
+  geom_point()+ggtitle("Median Fare by Taxi as Function of Rides Given")+xlab("Rides Given")+ylab("Median Fare per Ride")
+
+```
+```{r}
+#Throw out 10/2016 because zero rides
+tipStatsByTaxi <- df %>% drop_na(c("tips")) %>% dplyr::group_by(taxi=taxi_id) %>% filter(tips>=0) %>%
+   summarize(AvgTip=mean(tips),MedianTip=median(tips),MaxTip=max(tips),Trips=n()) %>% arrange(desc(Trips))
+tipStatsByTaxi
+ggplot(tipStatsByTaxi, aes(x=Trips, y=MedianTip, group=1))+
+  geom_point()+ggtitle("Median Tip by Taxi as Function of Rides Given")+xlab("Rides Given")+ylab("Median Tip per Ride")
+ggplot(tipStatsByTaxi, aes(x=Trips, y=AvgTip, group=1))+
+  geom_point()+ggtitle("Avg Tip by Taxi as Function of Rides Given")+xlab("Rides Given")+ylab("Avg Tip per Ride")
+
+```
+
+tipStatsByTaxi <- df %>% drop_na(c("tips")) %>% dplyr::group_by(taxi=taxi_id) %>% filter(tips>=0) %>%
+   summarize(AvgTip=mean(tips),MedianTip=median(tips),MaxTip=max(tips),Trips=n()) %>% arrange(desc(Trips))
+tipStatsByTaxi
+```{r}
+tipStatsByPickup <- df %>% drop_na(c("tips","trip_seconds","pickup_area")) %>% dplyr::group_by(pickup_area) %>% 
+   filter(n()>100) %>% filter(trip_seconds>0)  %>%
+   summarize(AvgTip=round(mean(tips),2),
+             AvgTipPerMin=round(mean(tips/(trip_seconds/60)),2),
+             MedianTip=median(tips),
+             MedianTipPerMin=round(median(tips/(trip_seconds/60)),2),
+             MaxTip=max(tips),
+             NoTip=sum(ifelse(tips==0,1,0)),
+             PercentTip=round(100*(sum(ifelse(tips==0,0,1)))/n(),1),
+             Trips=n()) %>% 
+  arrange(desc(PercentTip))
+tipStatsByPickup
+```

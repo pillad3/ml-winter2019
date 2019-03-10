@@ -8,7 +8,7 @@ Code for the Booth Machine Learning Winter 2019 class
 - Identifying suspicious behavior like systematically "broken" meters
 - [Dave 2/26/2019] Can we identify taxi IDs that are less likely to drop off at certain Community Areas?
     - Thought this might be interesting to look at. It's illegal for a driver to turn down a fare just based on the customer's destination, but it definitely happens. We may be able to see drivers who systematically have less drop-offs in bad areas.
-
+- [Zal 3/3/2019] We can definitely find these guys. Take a peek through the dataExploration.rmd and models.rmd I've put together. I started compiling stats at the end of the first file on rides by cab ID.
 
 ### Helpful links
 - [Markdown Guide](https://www.markdownguide.org/)
