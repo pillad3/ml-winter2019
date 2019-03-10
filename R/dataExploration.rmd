@@ -41,9 +41,9 @@ set.seed(1) #Always set the seed for reproducibility
 Load data and begin generating exploratory plots.
 
 ```{r}
-source("taxiData.R")
+source("R/taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(1000000)
+data1m <- taxiData(2000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 df$dropoff_community_area<-as.factor(df$dropoff_community_area)
@@ -51,7 +51,7 @@ df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_locat
 df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
 df$trip_total<-as.numeric(df$trip_total)
 #Load census data by Chicago Community Area
-ccaData <- read.csv("ChicagoCCAData.csv")
+ccaData <- read.csv("R/ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
 #Look up name of pickup CCA and add to df
@@ -97,9 +97,47 @@ Throw out all rows where NAs exist for dropoff/pickup location and convert NA to
 
 ```{r}
 #Uncomment the following line to drop all records where dropoff_area and pickup_area NA
-df<-df %>% drop_na(c("dropoff_area","pickup_area"))
+#df<-df %>% drop_na(c("dropoff_area","pickup_area"))
 #Replace <NA> with string "NA" which can be used for grouping
 df$company <- fct_explicit_na(df$company,"NA")
+```
+
+Maps Pickups vs. Income and Dropoffs vs. Income; expectation would be that pickups and dropoffs would be highly correlated with income.
+
+```{r}
+#Prepares dataframe for the pickup rank and ranks those values
+topPick<-df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
+topPick$pickrank<-rank(-topPick$n,ties.method="max")
+
+#Prepares dataframe for the income rank and ranks those values
+topInc<-df %>% dplyr::group_by(MedIncome,pickup_area) %>% tally(sort=TRUE)
+topInc$incrank<-rank(-topInc$MedIncome)
+
+#Joins the two datasets by their pickup_area names
+topPick <- topPick %>% inner_join(topInc,incrank,by=c("pickup_area"))
+
+#Drops a redundant column
+topPick$n.y <- NULL
+
+#Graphs these bad boys
+ggplot(data=topPick) +
+  geom_point(mapping=aes(x=incrank, y=pickrank, size=n.x)) +
+  geom_abline(mapping = NULL, data = NULL, slope=1, intercept=0)
+
+#We could do a top dropoff, but the MedIncome field is explicitly tied to pickup, which is probably fine 
+#for what we're going after. IF we wanted it, as well, we could get it, but it might be a bit more 
+#difficult than it's worth - it would require a new "MedIncome" column, that was tied to dropoffs
+
+
+#topDO<-df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
+#topDO$droprank<-rank(-topDO$n,ties.method="max")
+
+#topDO <- topDO %>% inner_join(topInc, incrank, by=c("pickup_area"))
+#topDO$n.y <- NULL
+
+#ggplot(data=topDO) +
+#  geom_point(mapping=aes(x=incrank, y=droprank, size=n.x)) +
+#  geom_abline(mapping = NULL, data = NULL, slope=1, intercept=0)
 ```
 
 ## Start Summary Tables
