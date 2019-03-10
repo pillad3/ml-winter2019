@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(500000)
+data1m2 <- taxiData(2000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -113,7 +113,7 @@ levels(df$pickup_area_group)<-c(levels(topPickup05Perc$pickup_area),"Other")
 colFilter <- c("pickup_area_group","fare","endHour","endMonth","endDay","trip_seconds","Pop16Plus","MedIncome","LaborPart")
 dfSlim <- df[colFilter] %>% drop_na()
 dfSlim <- dfSlim[dfSlim$fare>=2.25,]
-cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe.")
+cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe. Leaves ", nrow(dfSlim)," total records.")
 #rm(df)
 #gc()
 ```
@@ -201,5 +201,6 @@ vdf = dfSlim[-train_index, ]#validation_data
 lgfit=glm(fare~.,tdf,family="gaussian",y=FALSE,model=FALSE)
 
 phat = predict(lgfit, vdf, type="response")
+data1m2 <- taxiData(3000000)
 ```
 
