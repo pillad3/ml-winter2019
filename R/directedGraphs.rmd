@@ -1,0 +1,143 @@
+---
+title: "Final Project"
+subtitle: "Data Exploration"
+author: ""
+date: "2019-Feb-25"
+fontsize: 8 pt
+output:
+  #    beamer_presentation: #everything after hash "#" will be ignored 
+pdf_document:
+number_sections: false
+fig_width: 6
+fig_height: 4
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      #include = TRUE, 
+                      eval = TRUE, 
+                      
+                      fig.width = 6, fig.height = 4,
+                      results='hold',
+                      warning = FALSE,
+                      message=FALSE,
+                      cache = TRUE,
+                      digits = 3) 
+```
+
+```{r,echo=FALSE,results='hide', message=FALSE}
+# Packages and Data Parser
+#Note: Be sure plyr is loaded before dplyr
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","igraph","network","sna","visNetwork","threejs","networkD3","ndtv")
+NewPackages=PackageList[!(PackageList %in% 
+                            installed.packages()[,"Package"])]
+if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
+lapply(PackageList,require,character.only=TRUE)#array function
+
+options(tibble.print_max = Inf, tibble.print_min = 20) 
+set.seed(1) #Always set the seed for reproducibility
+```
+
+Load data and begin generating exploratory plots.
+
+```{r}
+source("taxiDatazw.R")
+#Load records from taxi data source and store as a dataframe
+data1m <- taxiDataZW(1000000)
+df <- data.frame(data1m$rawData)
+rm(data1m) #Drop old data
+df$dropoff_community_area<-as.factor(df$dropoff_community_area)
+df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_location.coordinates)
+df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
+df$trip_total<-as.numeric(df$trip_total)
+#Load census data by Chicago Community Area
+ccaData <- read.csv("ChicagoCCAData.csv")
+ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
+ccaData$GEOG<-as.factor(ccaData$GEOG)
+#Look up name of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'GEOG'] <- 'pickup_area'
+#Look up name of dropoff CCA and add to df
+df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
+#Look up population>16yo of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,POP_16OV,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'POP_16OV'] <- 'Pop16Plus'
+#Look up Labor Force of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,IN_LBFRC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'IN_LBFRC'] <- 'IN_LBFRC'
+#Look up Unemp of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,UNEMP,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'UNEMP'] <- 'UNEMP'
+#Look up Unemp of pickup CCA and add to df
+df<- df %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(df)[names(df) == 'MEDINC'] <- 'MedIncome'
+```
+
+
+Clean data. For instance, "Chicago Elite Cab Corp. (Chicago Carriag" and "Chicago Elite Cab Corp." are clearly the same firm. We replace the former with the latter. 
+We add factors for the Start Date (as opposed to date time), End Date, and Start Day of Week.
+* In company, set "Chicago Elite Cab Corp. (Chicago Carriag" equal to "Chicago Elite Cab Corp."
+* Add factor for Start Date (not date time)
+* Add factor for End Date (not date time)
+* Add factor for End Day of week
+* Add factor for End month
+* Add factor for End hour
+
+```{r}
+df$company[df$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
+df$startDate <- date(df$trip_start_timestamp)
+df$endDate <- date(df$trip_end_timestamp)
+df$endDay <- wday(df$trip_end_timestamp,label=TRUE)
+df$endMonth <- month(df$trip_end_timestamp,label=TRUE)
+df$endHour <- hour(str_replace(df$trip_end_timestamp,"T"," "))
+```
+
+Throw out all rows where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
+
+```{r}
+#Uncomment the following line to drop all records where dropoff_area and pickup_area NA
+df<-df %>% drop_na(c("dropoff_area","pickup_area"))
+#Replace <NA> with string "NA" which can be used for grouping
+df$company <- fct_explicit_na(df$company,"NA")
+df$pickup_area <- fct_explicit_na(df$pickup_area,"NA")
+df$dropoff_area <- fct_explicit_na(df$dropoff_area,"NA")
+```
+
+## Start Summary Tables
+
+Create summary tables
+* Ride count by Company
+* Ride count by Dropoff Area
+* Ride count by Pickup Area
+* Rice count, avg fare, avg distance by pickup area
+* Rice count, avg fare, avg distance by dropoffS area
+```{r}
+#Note: I am calling dplyr's functions directly to avoid issues with summarize
+#Trips by Company
+df %>% dplyr::group_by(company) %>% tally(sort=TRUE)
+#Trips by Dropoff Area
+topDrop <- df %>% dplyr::group_by(dropoff_area) %>% tally(sort=TRUE)
+topDrop
+#Trips by Origination and Destination
+df %>% dplyr::group_by(pickup_area,dropoff_area) %>% tally(sort=TRUE)
+#Trips by Pickup Area
+topPickup <- df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
+topPickup
+
+#Avg Fare and Distance by Pickup and Dropoff Areas
+df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),
+  total_fares = round(sum(fare,na.rm=TRUE),2),                                     total_tips = round(sum(tips,na.rm=TRUE) ,2),
+  avg_tip=round(mean(tips,na.rm=TRUE),2),
+  avg_tip_percentFare=round(100*mean(tips/fare,na.rm=TRUE),1),
+  mean_fare = round(mean(fare,na.rm=TRUE),2),
+  median_fare = round(median(fare,na.rm=TRUE),2),
+  min_fare=round(min(fare,na.rm=TRUE),2),
+  max_fare=round(max(fare,na.rm=TRUE),2),
+  mean_distance=round(mean(trip_miles,na.rm=TRUE),1),
+  median_distance=round(median(trip_miles,na.rm=TRUE),1),
+  min_distance=round(min(trip_miles,na.rm=TRUE),1),
+  max_distance=round(max(trip_miles,na.rm=TRUE),1)
+  )  %>% arrange(desc(total_trips))
+```
+
