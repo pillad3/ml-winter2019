@@ -65,9 +65,10 @@ taxiData <- function(numberOfRows, startIndex = 0, cleanData = TRUE) {
     rawData <- rbind(rawData, json)
   }
   
+  rawData <- tibble::as_tibble(rawData)
   if (cleanData) {
     # Clean the data types and make it a tibble
-    rawData = tibble::as_tibble(rawData) %>%
+    rawData = rawData %>%
       mutate(
         company = as.factor(company),
         pickup_community_area = as.factor(pickup_community_area),
