@@ -41,9 +41,9 @@ set.seed(1) #Always set the seed for reproducibility
 Load data and begin generating exploratory plots.
 
 ```{r}
-source("taxiDatazw.R")
+source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiDataZW(1000000)
+data1m <- taxiData(1500000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 df$dropoff_community_area<-as.factor(df$dropoff_community_area)
@@ -125,8 +125,12 @@ df %>% dplyr::group_by(pickup_area,dropoff_area) %>% tally(sort=TRUE)
 topPickup <- df %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
 topPickup
 
+#Remove fares of zero to avoid division by zero
+dfFilter <- df[df$fare>0,]
 #Avg Fare and Distance by Pickup and Dropoff Areas
-df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),
+dfForGraph <- dfFilter %>% drop_na(c("pickup_area")) %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),
+  percent_all_trips = round(100*n()/nrow(dfFilter),1), 
+  tripsPerCapita = round(n()/mean(Pop16Plus,na.rm=TRUE),4), 
   total_fares = round(sum(fare,na.rm=TRUE),2),                                     total_tips = round(sum(tips,na.rm=TRUE) ,2),
   avg_tip=round(mean(tips,na.rm=TRUE),2),
   avg_tip_percentFare=round(100*mean(tips/fare,na.rm=TRUE),1),
@@ -139,5 +143,40 @@ df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trip
   min_distance=round(min(trip_miles,na.rm=TRUE),1),
   max_distance=round(max(trip_miles,na.rm=TRUE),1)
   )  %>% arrange(desc(total_trips))
+
 ```
+
+```{r}
+dfForGraphFilt<-dfForGraph[dfForGraph$percent_all_trips<.5 & dfForGraph$percent_all_trips>.45  ,]
+net <- graph_from_data_frame(d=dfForGraphFilt, directed=T)
+
+# Compute node degrees (#links) and use that to set node size:
+deg <- igraph::degree(net, mode="all")
+V(net)$size <- deg*2
+
+clp <- cluster_optimal(net)
+#clp <- cluster_edge_betweenness(net, weights = E(net)$weight, directed = TRUE,
+#  edge.betweenness = TRUE, merges = FALSE, bridges = TRUE,
+#  modularity = FALSE, membership = TRUE)
+plot(clp,net,edge.arrow.size=.4,edge.curved=.1)
+
+plot(clp,net,layout=layout_in_circle(net),edge.arrow.size=.4, edge.curved=.1)
+l <- layout_with_fr(net)
+plot(clp,net,layout=l,edge.arrow.size=.4, edge.curved=.1)
+
+lkk <- layout_with_kk(net)
+plot(clp,net,layout=lkk,edge.arrow.size=.4, edge.curved=.1)
+
+
+dfForGraphHeat<-dfForGraph[1:40,]
+net2 <- graph_from_data_frame(d=dfForGraphHeat, directed=T)
+
+netm <- get.adjacency(net2,attr=c("percent_all_trips"),sparse=F)
+colnames(netm) <- V(net2)$name
+rownames(netm) <- V(net2)$name
+palf <- colorRampPalette(c("white","maroon"))
+heatmap(netm, Rowv = NA, Colv = NA, col = palf(1000),scale="none",margins=c(10,10) )
+
+```
+
 

@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m2 <- taxiData(2000000)
+data1m <- taxiData(1000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -100,7 +100,7 @@ df$LaborPart <- ((df$IN_LBFRC-df$UNEMP)/df$IN_LBFRC)
 Throw out all rows where NAs exist for dropoff/pickup location and other fields to be used in model. We will group all pickup areas originating fewer than 0.5% of all trip into 1 factor called "Other"
 
 ```{r, "Create slim dataset for modeling"}
-#Calculate # trips by area and order, most to least. Pick out those with at least 0.5% of trips.
+#Calculate # trips by area and order, most to least. Pick out those with at least 0.5% of trips. 
 topPickup <- df %>% drop_na(c("pickup_area")) %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
 topPickup05Perc <- topPickup[topPickup$n>(.005*nrow(drop_na(df,c("pickup_area")))),]
 #Remove unused levels
@@ -109,15 +109,55 @@ topPickup05Perc$pickup_area <- droplevels(topPickup05Perc$pickup_area)
 df$pickup_area_group <- as.factor(ifelse(!df$pickup_area %in% topPickup05Perc$pickup_area,"Other",df$pickup_area))
 levels(df$pickup_area_group)<-c(levels(topPickup05Perc$pickup_area),"Other")
 
+#Do the same thing for company to reduce the number of factor levels
+topCompany <- df %>% drop_na(c("company")) %>% dplyr::group_by(company) %>% tally(sort=TRUE)
+topCompany05Perc <- topCompany[topCompany$n>(.005*nrow(drop_na(df,c("company")))),]
+
+topCompany05Perc$company <- droplevels(topCompany05Perc$company)
+#Add levels, including one for "Other"
+df$company_group <- as.factor(ifelse(!df$company %in% topCompany05Perc$company,"Other",df$company))
+levels(df$company_group)<-c(levels(topCompany05Perc$company),"Other")
+
 #Filter on the following columns--drop all rows where NA encountered in any column
-colFilter <- c("pickup_area_group","fare","endHour","endMonth","endDay","trip_seconds","Pop16Plus","MedIncome","LaborPart")
+colFilter <- c("company_group","payment_type","tips","trip_miles","trip_seconds","Pop16Plus","IN_LBFRC","UNEMP","MedIncome","endDay","endMonth","endHour","LaborPart","pickup_area_group","fare")
 dfSlim <- df[colFilter] %>% drop_na()
-dfSlim <- dfSlim[dfSlim$fare>=2.25,]
+#Drop records where fare is below the min, likely bad
+dfSlim <- dfSlim[dfSlim$fare>=3.25,]
+#Drop fare since obviously large fares will drive large tips
+dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare"))]
 cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe. Leaves ", nrow(dfSlim)," total records.")
 #rm(df)
 #gc()
 ```
 
+```{r}
+#Drop any row containing NA in any column
+dfTree <- dfSlim
+dfTree <- dfTree[complete.cases(dfTree),]
+
+nSample <- floor(0.75*nrow(dfTree))
+train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
+
+trainSample <- dfTree[train_ind,] #drop the final redundant dummy var for target_control
+validateSample <- dfTree[-train_ind,]
+```
+# Regression
+
+Let's measure RMSE using the same training and validation data sets for a linaer regression model.
+
+```{r, "Logistic Regression - fare"}
+#logistic regression, y=FALSE and model=FALSE to save memory
+lgfit = glm(tips~.,trainSample,family="gaussian",y=FALSE,model=TRUE)
+
+phat_t = predict(lgfit, trainSample, type="response")
+phat_v = predict(lgfit, validateSample, type="response")
+
+errorTrain = sqrt(mean((phat_t-trainSample$tips)^2))
+errorValidate = sqrt(mean((phat_v-validateSample$tips)^2))
+
+cat("Linear Regression Training error: $",round(errorTrain,2))
+cat("\nLinear Regression Validation error: $",round(errorValidate,2))
+```
 # Trees
 
 One hypothesis is that there are different subsets of riders which we may be able to identify based upon:
@@ -129,23 +169,10 @@ One hypothesis is that there are different subsets of riders which we may be abl
 
 We will use tree-based models to model tips as well as fares
 
-```{r}
-colsToUse=c("company","extras","fare","payment_type","tips","tolls","trip_miles","trip_seconds","trip_total","pickup_area","dropoff_area","Pop16Plus","IN_LBFRC","UNEMP","MedIncome","startDate","endDate","endDay","endMonth","endHour","LaborPart","pickup_area","dropoff_area")
-#Drop any row containing NA in any column
-dfTree <- df[,colsToUse]
-dfTree <- dfTree[complete.cases(dfTree),]
 
-set.seed(1)
-
-nSample <- floor(0.75*nrow(dfTree))
-train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
-
-trainSample <- dfTree[train_ind,] #drop the final redundant dummy var for target_control
-validateSample <- dfTree[-train_ind,]
-```
 We will construct a big tree to start.
 ```{r}
-big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=10,cp=0.00001,xval=10))
+big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=1000,cp=0.001,xval=10))
 nbig = length(unique(big_tree$where)) 
 
 cat('size of big tree: ',nbig,'\n')
@@ -159,9 +186,6 @@ cptable = printcp(big_tree)
 (index_cp_std = Position(function(x) x < val_h, cptable[, "xerror"]))
 (cp_std = cptable[ index_cp_std, "CP" ])   
 ```
-
-
-
 We then prune back this big tree for a range of different CP, calculating the misclassification rate and loss as a function of tree size for both our training and validation data.
 ```{r}
 cpvec = big_tree$cptable[,"CP"]
@@ -183,24 +207,69 @@ ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) + 
 
 plotcp(big_tree,upper="size")
 ```
+This indicates that the tip predictions from an 80-node tree have an error of roughly ~$0.60 per trip. ~0.5 at 375 nodes. 
 
-This indicates that the tip predictions from an 80-node tree are roughly ~$0.60 per trip.
-```{r, "Specify train/validation data"}
-#split sample into training and testing
-n = nrow(dfSlim)
-#train_index = sample(n, size = n * 0.9, replace = FALSE)
-train_index = seq(1:floor(.9*n))
-tdf = dfSlim[train_index,] #training_data
-vdf = dfSlim[-train_index, ]#validation_data
+So far logistic regressions look better for modeling tips--let's try using boosting.
+
+## Trees with Boosting
+When boosting we also want to try various combinations of model parameters (tree depth, number of trees, and shrinkage). For tree depth be try 1, 2, and 3. For number of trees we try 3 values from 500 to 1000 and for the shrinkage parameter we try values from .02 and .04.
+```{r}
+phatT=list()
+phatV=list()
+
+idv = c(1,3)
+ntv = c(250,500,1000,2000)
+shv = c(.01,.04)
+setboost = expand.grid(idv,ntv,shv)
+
+colnames(setboost) = c("tdepth","ntree","shrink")
+phatV$boost = matrix(0.0,nrow(validateSample),nrow(setboost))
+phatT$boost = matrix(0.0,nrow(trainSample),nrow(setboost))
+tdB=trainSample
+vdB=validateSample;
+
+for(i in 1:nrow(setboost)) {
+tic()
+##fit and predict
+cat('Now i=',i ,'/',nrow(setboost), ', ')
+fboost = gbm(tips~., data=tdB, distribution="gaussian",
+  n.trees=setboost[i,2],
+  interaction.depth=setboost[i,1],
+  shrinkage=setboost[i,3])
+phatV$boost[,i] = predict(fboost,newdata=vdB,n.trees=setboost[i,2],type="response")
+phatT$boost[,i] = predict(fboost,newdata=tdB,n.trees=setboost[i,2],type="response")
+toc()
+}
 ```
+Calculate train and validation error under
+```{r}
+errorTrain=rep(0,nrow(setboost))
+errorValidate=rep(0,nrow(setboost))
 
-##Logistic Regressions
+for(i in 1:nrow(setboost)) {
+  errorTrain[i]=sqrt(mean((phatT$boost[,i]-trainSample$tips)^2))
+  errorValidate[i]=sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
+}
 
-```{r, "Logistic Regression - fare"}
-#logistic regression, y=FALSE and model=FALSE to save memory
-lgfit=glm(fare~.,tdf,family="gaussian",y=FALSE,model=FALSE)
+errors = list()
+nmethod = ncol(phatV)
+for(i in 1:nmethod) {
+  nrun = ncol(phatV[[i]])
+  lvec = rep(0,nrun)
+  for(j in 1:nrun) lvec[j] = sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
+  lossL[[i]]=lvec; names(lossL)[i] = names(phatV)[i]
+}
+lossv = unlist(lossL)
 
-phat = predict(lgfit, vdf, type="response")
-data1m2 <- taxiData(3000000)
+par(mfrow=c(1,1))
+plot(lossv, ylab="loss on validation", type="n")
+nloss=0
+for(i in 1:nmethod) {
+ii = nloss + 1:ncol(phatV[[i]])
+points(ii,lossv[ii],col=i,pch=17)
+nloss = nloss + ncol(phatV[[i]])
+}
+
+
 ```
 
