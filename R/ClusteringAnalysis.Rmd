@@ -3,6 +3,8 @@ title: "Clustering Analysis"
 author: ""
 date: "2019-Mar-22"
 output: pdf_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -20,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","kmeans","mclust","reshape2","ggplot2")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats", "Rtsne", "cluster", "kmeans","mclust","reshape2","ggplot2")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -138,4 +140,128 @@ ggplot(comp.df, aes(x = cluster, y = trip_seconds)) +
   geom_boxplot()
 ggplot(comp.df, aes(x = cluster, y = trip_total)) + 
   geom_boxplot()
+```
+
+
+```{r}
+
+### THESE COLUMN VALUES ARE NOT THE SAME AS IN THE DATA EXPLORATION FILE - WILL NEED TO ENSURE VALUES ALIGN
+
+### ALSO NEED TO ENSURE NA IS CONVERTED TO A VALUE SUCH THAT THOSE TRIPS ARE CONSIDERED
+kprep <- select(na.omit(data), company, trip_miles, trip_seconds, fare, trip_total, extras, endDay, endMonth, payment_type, pickup_area, dropoff_area, MedIncome)
+ 
+#hack-in install.packages(cluster) - I've put it in the top
+#library(cluster)
+
+#For use in "gower" model, leveraging mixed variables. I sampled 5000 entries because even 1M blows this thing up to 10+ GB
+gowclean<-kprep[sample(nrow(kprep), 5000), ]
+gowclean$extras<-NULL
+
+#d is a dissimilarity, which needs to be made into a matrix for future ops
+d <- daisy(gowclean, metric="gower")
+
+d_mat <- as.matrix(d)
+
+#Shows us the two "most similar" entries
+gowclean[which(d_mat==min(d_mat[d_mat!=min(d_mat)]),
+                arr.ind=TRUE)[1, ],]
+
+#Shows us the two "least similar" entries
+gowclean[which(d_mat==max(d_mat[d_mat!=max(d_mat)]),
+               arr.ind=TRUE)[1,],]
+
+## What follows is a series of things to a) select best k and b) fit them to the 
+sil_width <- c(NA)
+
+for (i in 2:10) {
+  pam_fit <- pam(d, diss=TRUE, k=i)
+  sil_width[i]<-pam_fit$silinfo$avg.width
+}
+
+##This plots the Number of Clusters vs. Silhouette Width, a measure similarity of a and neighbor b
+plot(1:10, sil_width, xlab="Number of Clusters", ylab="Silhouette Width")
+lines(1:10, sil_width)
+```
+
+This graph shows us the optimal clusters are 3 for all pickups/dropoffs in the smaller sample.
+```{r}
+#Here we run the PAM algorithm (like k-means) on the best "k"
+pam_fit <- pam(d, diss=TRUE, k=3)
+
+pam_results<-gowclean %>% mutate(cluster=pam_fit$clustering) %>% group_by(cluster) %>% do(the_summary = summary(.))
+
+#shows us the vital stats of each one of these clusters
+pam_results$the_summary
+
+#visualize medoids to see the centers of each cluster
+gowclean[pam_fit$medoids,]
+
+#Need to quick-install Rtsne to get these clusters going - I've commented out to drop-in
+#install.packages("Rtsne")
+#library(Rtsne)
+
+#Generates a plot of all 3 clusters over-lapped.
+tsne_obj<-Rtsne(d,is_distance=TRUE)
+tsne_data <- tsne_obj$Y %>% data.frame() %>% setNames(c("X","Y")) %>% mutate(cluster=factor(pam_fit$clustering),name=gowclean$pickup_area)
+ggplot(aes(x=X, y=Y), data=tsne_data) +
+  geom_point(aes(color=cluster))
+
+##Now, we strip out the powerful pickups (Near North Side, Loop)
+#Creates new gower model data
+gownew <- data.frame(kprep)
+
+#Creates a new filter to strip out the two pickups
+gownew <- gownew %>% filter(pickup_area!="Near North Side" & pickup_area!="Loop")
+
+gownew<-gownew[sample(nrow(gownew), 7500), ]
+gownew$extras<-NULL
+
+#d is a dissimilarity, which needs to be made into a matrix for future ops
+d2 <- daisy(gownew, metric="gower")
+
+d2_mat <- as.matrix(d2)
+
+#Shows us the two "most similar" entries
+gownew[which(d2_mat==min(d2_mat[d2_mat!=min(d2_mat)]),
+                arr.ind=TRUE)[1, ],]
+
+#Shows us the two "least similar" entries
+gownew[which(d2_mat==max(d2_mat[d2_mat!=max(d2_mat)]),
+               arr.ind=TRUE)[1,],]
+
+
+## What follows is a series of things to a) select best k and b) fit them to the 
+sil_widthe <- c(NA)
+
+for (i in 2:10) {
+  pam2_fit <- pam(d2, diss=TRUE, k=i)
+  sil_widthe[i]<-pam2_fit$silinfo$avg.width
+}
+
+##This plots the Number of Clusters vs. Silhouette Width, a measure similarity of a and neighbor b
+plot(1:10, sil_widthe, xlab="Number of Clusters", ylab="Silhouette Width")
+lines(1:10, sil_widthe)
+```
+
+The graph shows us that the optimal number of clusters is 6.
+
+```{r}
+#Here we run the PAM algorithm (like k-means) on the best "k" - This Chart shows us 6 clusters
+pam2_fit <- pam(d2, diss=TRUE, k=6)
+
+pam2_results<-gownew %>% mutate(cluster=pam2_fit$clustering) %>% group_by(cluster) %>% do(the_summary = summary(.))
+
+#shows us the vital stats of each one of these clusters
+pam2_results$the_summary
+
+#visualize medoids to see the centers of each cluster
+gownew[pam2_fit$medoids,]
+
+#Generates a plot of all 6 clusters over-lapped.
+tsne2_obj<-Rtsne(d2,is_distance=TRUE)
+tsne2_data <- tsne2_obj$Y %>% data.frame() %>% setNames(c("X","Y")) %>% mutate(cluster=factor(pam2_fit$clustering),name=gownew$pickup_area)
+ggplot(aes(x=X, y=Y), data=tsne2_data) +
+  geom_point(aes(color=cluster))
+
+
 ```
