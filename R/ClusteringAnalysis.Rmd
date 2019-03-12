@@ -1,0 +1,141 @@
+---
+title: "Clustering Analysis"
+author: ""
+date: "2019-Mar-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      #include = TRUE, 
+                      eval = TRUE, 
+                      fig.width = 6, fig.height = 4,
+                      results='hold',
+                      warning = FALSE,
+                      message=FALSE,
+                      cache = TRUE,
+                      digits = 3) 
+```
+
+```{r,echo=FALSE,results='hide', message=FALSE}
+# Packages and Data Parser
+#Note: Be sure plyr is loaded before dplyr
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","kmeans","mclust","reshape2","ggplot2")
+NewPackages=PackageList[!(PackageList %in% 
+                            installed.packages()[,"Package"])]
+if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
+lapply(PackageList,require,character.only=TRUE)#array function
+
+source("taxiData.R")
+
+options(tibble.print_max = Inf, tibble.print_min = 20) 
+set.seed(1) #Always set the seed for reproducibility
+```
+
+```{r}
+# Load 10K taxi rides
+data <- taxiData(500000, cleanData = FALSE)$rawData %>%
+  select(  # Only select identifiers and variables we want to use in clustering
+    trip_id,
+    taxi_id,
+    company,
+    dropoff_community_area,
+    extras,
+    fare,
+    payment_type,
+    pickup_community_area,
+    tips,
+    tolls,
+    trip_end_timestamp,
+    trip_miles,
+    trip_seconds,
+    trip_start_timestamp,
+    trip_total,
+    dropoff_census_tract,
+    pickup_census_tract
+  ) %>%
+  mutate(  # Fix any data types that tibble doesn't get right automatically
+    trip_id = as.character(trip_id),
+    taxi_id = as.factor(taxi_id),
+    extras = as.numeric(extras),
+    tolls = as.numeric(tolls),
+    trip_end_timestamp = as.POSIXct(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS"),
+    trip_start_timestamp = as.POSIXct(trip_start_timestamp, format="%Y-%m-%dT%H:%M:%OS"),
+    trip_total = as.numeric(trip_total),
+    dropoff_census_tract = as.factor(dropoff_census_tract),
+    pickup_census_tract = as.factor(pickup_census_tract)
+  ) %>%
+  drop_na() %>% # Drop any row with an N/A value
+  filter(
+    extras < 200,  # Remove crazy $1,200+ extra outlier
+    tolls < 1  # Remove two outliers (not crazy, but will throw off clustering)
+  )
+
+data <- as.data.frame(data)
+
+cat("Number of rows after cleaning: ", nrow(data))
+summary(data[, -1])  # We don't need a summary for trip ID
+```
+
+
+```{r, message=TRUE}
+# Scale the numeric values
+scaled <- as.data.frame(data %>% select_if(is.numeric))
+scaled <- scale(scaled[,-4])  # exclude Tolls for the moment
+
+kMax <- 30
+kvec <- 2:kMax
+sse <- c()    # within-group sum of squared errors
+ratio <- c()  # between-group SS / total SS
+for(k in kvec) {
+  message("Running cluster ", k)
+  model <- kmeans(scaled[,c(-1:-2)], centers = k, nstart = 50)
+  sse = c(sse, model$tot.withinss)
+  ratio = c(ratio, model$betweenss/model$totss)
+}
+
+par(mfrow=c(1,2))
+plot(kvec, sse, "b")
+plot(kvec, ratio, "b")
+```
+
+```{r}
+d_clust <- Mclust(as.matrix(scaled), G=2:kMax)
+m.best <- dim(d_clust$z)[2] 
+cat("model-based optimal number of clusters:", m.best, "\n") 
+```
+
+```{r}
+model <- kmeans(scaled, centers = m.best, nstart = 50)
+
+# From scaled centers to original centers
+centers <- sweep(model$centers %*% diag(attr(scaled, 'scaled:scale')), 2,
+                 -attr(scaled, 'scaled:center'))
+
+# Print the number of households in each cluster
+cluster <- lapply(1:m.best, function(i)as.character(data[model$cluster==i, 1]))
+
+for (i in 1:m.best) {
+  cat("Number of rides in cluster ", i, ": ", length(cluster[[i]]), "\n")
+}
+```
+
+```{r, cache=FALSE}
+comp.df <- cbind(data, model$cluster)
+clusterColIndex <- ncol(comp.df)
+names(comp.df)[clusterColIndex] <- "cluster"
+comp.df$cluster <- as.factor(comp.df$cluster)
+
+ggplot(comp.df, aes(x = cluster, y = fare)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = tips)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = extras)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = trip_miles)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = trip_seconds)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = trip_total)) + 
+  geom_boxplot()
+```
