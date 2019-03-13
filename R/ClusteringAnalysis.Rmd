@@ -168,7 +168,7 @@ kprep <- select(na.omit(data), company, trip_miles, trip_seconds, fare, trip_tot
 
 #For use in "gower" model, leveraging mixed variables. I sampled 5000 entries because even 1M blows this thing up to 10+ GB
 gowclean<-kprep[sample(nrow(kprep), 7000), ]
-#gowclean$extras<-NULL
+gowclean$extras<-NULL
 
 #d is a dissimilarity, which needs to be made into a matrix for future ops
 d <- daisy(gowclean, metric="gower")
