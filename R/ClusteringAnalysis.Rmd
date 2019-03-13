@@ -79,6 +79,19 @@ cat("Number of rows after cleaning: ", nrow(data))
 summary(data[, -1])  # We don't need a summary for trip ID
 ```
 
+```{r}
+#Load census data by Chicago Community Area
+ccaData <- read.csv("ChicagoCCAData.csv")
+ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
+ccaData$GEOG<-as.factor(ccaData$GEOG)
+#Look up name of pickup CCA and add to df
+data<- data %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(data)[names(data) == 'GEOG'] <- 'pickup_area'
+#Look up name of dropoff CCA and add to df
+data<- data %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(data)[names(data) == 'GEOG'] <- 'dropoff_area'
+
+```
 
 ```{r, message=TRUE}
 # Scale the numeric values
@@ -145,16 +158,16 @@ ggplot(comp.df, aes(x = cluster, y = trip_total)) +
 
 ```{r}
 
-### THESE COLUMN VALUES ARE NOT THE SAME AS IN THE DATA EXPLORATION FILE - WILL NEED TO ENSURE VALUES ALIGN
+### Do we want to add End Day, End Month?
 
-### ALSO NEED TO ENSURE NA IS CONVERTED TO A VALUE SUCH THAT THOSE TRIPS ARE CONSIDERED
-kprep <- select(na.omit(data), company, trip_miles, trip_seconds, fare, trip_total, extras, endDay, endMonth, payment_type, pickup_area, dropoff_area, MedIncome)
+### Do we want to include NA?
+kprep <- select(na.omit(data), company, trip_miles, trip_seconds, fare, trip_total, extras, payment_type, pickup_area, dropoff_area)
  
 #hack-in install.packages(cluster) - I've put it in the top
 #library(cluster)
 
 #For use in "gower" model, leveraging mixed variables. I sampled 5000 entries because even 1M blows this thing up to 10+ GB
-gowclean<-kprep[sample(nrow(kprep), 5000), ]
+gowclean<-kprep[sample(nrow(kprep), 7000), ]
 gowclean$extras<-NULL
 
 #d is a dissimilarity, which needs to be made into a matrix for future ops
@@ -186,7 +199,7 @@ lines(1:10, sil_width)
 This graph shows us the optimal clusters are 3 for all pickups/dropoffs in the smaller sample.
 ```{r}
 #Here we run the PAM algorithm (like k-means) on the best "k"
-pam_fit <- pam(d, diss=TRUE, k=3)
+pam_fit <- pam(d, diss=TRUE, k=2)
 
 pam_results<-gowclean %>% mutate(cluster=pam_fit$clustering) %>% group_by(cluster) %>% do(the_summary = summary(.))
 
@@ -210,10 +223,10 @@ ggplot(aes(x=X, y=Y), data=tsne_data) +
 #Creates new gower model data
 gownew <- data.frame(kprep)
 
-#Creates a new filter to strip out the two pickups
+#Creates a new filter to strip out the two pickups NNS and Loop
 gownew <- gownew %>% filter(pickup_area!="Near North Side" & pickup_area!="Loop")
 
-gownew<-gownew[sample(nrow(gownew), 7500), ]
+gownew<-gownew[sample(nrow(gownew), 7000), ]
 gownew$extras<-NULL
 
 #d is a dissimilarity, which needs to be made into a matrix for future ops
@@ -243,11 +256,11 @@ plot(1:10, sil_widthe, xlab="Number of Clusters", ylab="Silhouette Width")
 lines(1:10, sil_widthe)
 ```
 
-The graph shows us that the optimal number of clusters is 6.
+The graph shows us that the optimal number of clusters is 2.
 
 ```{r}
 #Here we run the PAM algorithm (like k-means) on the best "k" - This Chart shows us 6 clusters
-pam2_fit <- pam(d2, diss=TRUE, k=6)
+pam2_fit <- pam(d2, diss=TRUE, k=2)
 
 pam2_results<-gownew %>% mutate(cluster=pam2_fit$clustering) %>% group_by(cluster) %>% do(the_summary = summary(.))
 
