@@ -168,7 +168,7 @@ kprep <- select(na.omit(data), company, trip_miles, trip_seconds, fare, trip_tot
 
 #For use in "gower" model, leveraging mixed variables. I sampled 5000 entries because even 1M blows this thing up to 10+ GB
 gowclean<-kprep[sample(nrow(kprep), 7000), ]
-gowclean$extras<-NULL
+#gowclean$extras<-NULL
 
 #d is a dissimilarity, which needs to be made into a matrix for future ops
 d <- daisy(gowclean, metric="gower")
@@ -210,8 +210,6 @@ pam_results$the_summary
 gowclean[pam_fit$medoids,]
 
 #Need to quick-install Rtsne to get these clusters going - I've commented out to drop-in
-#install.packages("Rtsne")
-#library(Rtsne)
 
 #Generates a plot of all 3 clusters over-lapped.
 tsne_obj<-Rtsne(d,is_distance=TRUE)
@@ -227,7 +225,7 @@ gownew <- data.frame(kprep)
 gownew <- gownew %>% filter(pickup_area!="Near North Side" & pickup_area!="Loop")
 
 gownew<-gownew[sample(nrow(gownew), 7000), ]
-gownew$extras<-NULL
+#gownew$extras<-NULL
 
 #d is a dissimilarity, which needs to be made into a matrix for future ops
 d2 <- daisy(gownew, metric="gower")
