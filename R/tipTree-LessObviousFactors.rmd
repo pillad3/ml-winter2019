@@ -214,5 +214,8 @@ ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) + 
 
 plotcp(big_tree,upper="size")
 fancyRpartPlot(big_tree)
+sink("rules.txt")
+rattle::asRules(big_tree,TRUE)
+sink()
 ```
 The error flatlines here--likely reflects the fact that we are excluding the major drivers of tip which are fare, distance, time. It might be better to look at tip or fare per minute.
