@@ -3,11 +3,13 @@ title: "Clustering Analysis"
 author: ""
 date: "2019-Mar-22"
 output: pdf_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, 
-                      include = TRUE, 
+                      #include = TRUE, 
                       eval = TRUE, 
                       fig.width = 6, fig.height = 4,
                       results='hold',
@@ -20,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","kmeans","mclust","reshape2","ggplot2")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats", "Rtsne", "cluster", "kmeans","mclust","reshape2","ggplot2")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -32,7 +34,6 @@ options(tibble.print_max = Inf, tibble.print_min = 20)
 set.seed(1) #Always set the seed for reproducibility
 ```
 
-Load and preprocess the data
 ```{r}
 # Load 10K taxi rides
 data <- taxiData(500000, cleanData = FALSE)$rawData %>%
@@ -64,55 +65,62 @@ data <- taxiData(500000, cleanData = FALSE)$rawData %>%
     trip_start_timestamp = as.POSIXct(trip_start_timestamp, format="%Y-%m-%dT%H:%M:%OS"),
     trip_total = as.numeric(trip_total),
     dropoff_census_tract = as.factor(dropoff_census_tract),
-    pickup_census_tract = as.factor(pickup_census_tract),
-    pickup_timeofday = as.POSIXlt(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS")$hour+
-      as.POSIXlt(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS")$min/60,
-    pickup_time_mday = as.POSIXlt(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS")$mday,
-    pickup_time_mon = as.POSIXlt(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS")$mon,
-    pickup_time_wday = as.POSIXlt(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS")$wday,
-    pickup_time_yday = as.POSIXlt(trip_end_timestamp, format="%Y-%m-%dT%H:%M:%OS")$yday,
+    pickup_census_tract = as.factor(pickup_census_tract)
   ) %>%
   drop_na() %>% # Drop any row with an N/A value
   filter(
     extras < 200,  # Remove crazy $1,200+ extra outlier
-    trip_seconds > 0,
-    trip_miles > 0
+    tolls < 1  # Remove two outliers (not crazy, but will throw off clustering)
   )
 
 data <- as.data.frame(data)
 
 cat("Number of rows after cleaning: ", nrow(data))
+summary(data[, -1])  # We don't need a summary for trip ID
 ```
 
-Perform clustering with the k-means algorithm. See if there is a clearly best value for `k` based on the inter- and intra-cluster error.
-
 ```{r}
+#Load census data by Chicago Community Area
+ccaData <- read.csv("ChicagoCCAData.csv")
+ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
+ccaData$GEOG<-as.factor(ccaData$GEOG)
+#Look up name of pickup CCA and add to df
+data<- data %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(data)[names(data) == 'GEOG'] <- 'pickup_area'
+#Look up name of dropoff CCA and add to df
+data<- data %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(data)[names(data) == 'GEOG'] <- 'dropoff_area'
+
+```
+
+```{r, message=TRUE}
 # Scale the numeric values
 scaled <- as.data.frame(data %>% select_if(is.numeric))
 scaled <- scale(scaled[,-4])  # exclude Tolls for the moment
 
-kMax <- 10
+kMax <- 30
 kvec <- 2:kMax
 sse <- c()    # within-group sum of squared errors
 ratio <- c()  # between-group SS / total SS
 for(k in kvec) {
-  message("running cluster ", k)
-  model <- kmeans(scaled, centers = k, nstart = 50)
+  message("Running cluster ", k)
+  model <- kmeans(scaled[,c(-1:-2)], centers = k, nstart = 50)
   sse = c(sse, model$tot.withinss)
   ratio = c(ratio, model$betweenss/model$totss)
 }
 
 par(mfrow=c(1,2))
-plot(kvec, sse, "b", main="Within-group SSE")
-plot(kvec, ratio, "b", main="Between-group SS / Total SS")
+plot(kvec, sse, "b")
+plot(kvec, ratio, "b")
 ```
 
-Normally, we'd select the number of clusters with the BIC method when there is not an obvious value for `k`. However, BIC seems to just select the largest number of clusters regardless of the range of clusters I give it (up to 20, after which it becomes a little more difficult to interpret and you start getting very small clusters which look more anamolous than insightful). Instead, I decided to look at the distribution for each value of k individually.
-
-Interestingly, `k=5` gave some result worth pointing out:
+```{r}
+d_clust <- Mclust(as.matrix(scaled), G=2:kMax)
+m.best <- dim(d_clust$z)[2] 
+cat("model-based optimal number of clusters:", m.best, "\n") 
+```
 
 ```{r}
-m.best <- 5
 model <- kmeans(scaled, centers = m.best, nstart = 50)
 
 # From scaled centers to original centers
@@ -127,8 +135,7 @@ for (i in 1:m.best) {
 }
 ```
 
-Clusters 4 and 5 both seem to product significantly higher fares, although cluster 5 has pretty much no tips...
-```{r}
+```{r, cache=FALSE}
 comp.df <- cbind(data, model$cluster)
 clusterColIndex <- ncol(comp.df)
 names(comp.df)[clusterColIndex] <- "cluster"
@@ -138,31 +145,134 @@ ggplot(comp.df, aes(x = cluster, y = fare)) +
   geom_boxplot()
 ggplot(comp.df, aes(x = cluster, y = tips)) + 
   geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = extras)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = trip_miles)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = trip_seconds)) + 
+  geom_boxplot()
+ggplot(comp.df, aes(x = cluster, y = trip_total)) + 
+  geom_boxplot()
 ```
 
-Looking at the pickup/dropoff community area per cluster, we can see that areas 56 and 76 spike for clusters 4 and 5. These happen to be the areas associated with Midway Airport and O'Hare Airport, respectively. Thus, it looks like airport traffic is driving systematically higher trips.
-
-```{r, fig.width=4}
-par(mfrow=c(1,1))
-for (i in 1:m.best) {
-  clusterData <- comp.df %>%
-    filter(cluster == i)
-  
-  pickup <- clusterData %>%
-    mutate(pickup_community_area = as.numeric(pickup_community_area)) %>%
-    arrange(pickup_community_area)
-  dropoff <- clusterData %>%
-    mutate(dropoff_community_area = as.numeric(dropoff_community_area)) %>%
-    arrange(dropoff_community_area)
-
-  hist(pickup$pickup_community_area, breaks = seq(from=1, to=80, by=1), main=paste0("Cluster ", i, " pickup areas"))
-  hist(dropoff$dropoff_community_area, breaks = seq(from=1, to=80, by=1), main=paste0("Cluster ", i, " dropoff areas"))
-}
-```
-
-This still does not explain the tips. Looking at the payment type distribution per cluster, however, we see that cluster 4 is all credit cards while cluster 5 is mostly cash. In this dataset, cash tips are not recorded. Thus, this dataset is actually likely under-reporting the revenue gained from airport routes.
 
 ```{r}
-plot(comp.df[comp.df$cluster == 4,]$payment_type, main="Cluster 4")
-plot(comp.df[comp.df$cluster == 5,]$payment_type, main="Cluster 5")
+
+### Do we want to add End Day, End Month?
+
+### Do we want to include NA?
+kprep <- select(na.omit(data), company, trip_miles, trip_seconds, fare, trip_total, extras, payment_type, pickup_area, dropoff_area)
+ 
+#hack-in install.packages(cluster) - I've put it in the top
+#library(cluster)
+
+#For use in "gower" model, leveraging mixed variables. I sampled 5000 entries because even 1M blows this thing up to 10+ GB
+gowclean<-kprep[sample(nrow(kprep), 7000), ]
+gowclean$extras<-NULL
+
+#d is a dissimilarity, which needs to be made into a matrix for future ops
+d <- daisy(gowclean, metric="gower")
+
+d_mat <- as.matrix(d)
+
+#Shows us the two "most similar" entries
+gowclean[which(d_mat==min(d_mat[d_mat!=min(d_mat)]),
+                arr.ind=TRUE)[1, ],]
+
+#Shows us the two "least similar" entries
+gowclean[which(d_mat==max(d_mat[d_mat!=max(d_mat)]),
+               arr.ind=TRUE)[1,],]
+
+## What follows is a series of things to a) select best k and b) fit them to the 
+sil_width <- c(NA)
+
+for (i in 2:10) {
+  pam_fit <- pam(d, diss=TRUE, k=i)
+  sil_width[i]<-pam_fit$silinfo$avg.width
+}
+
+##This plots the Number of Clusters vs. Silhouette Width, a measure similarity of a and neighbor b
+plot(1:10, sil_width, xlab="Number of Clusters", ylab="Silhouette Width")
+lines(1:10, sil_width)
+```
+
+This graph shows us the optimal clusters are 3 for all pickups/dropoffs in the smaller sample.
+```{r}
+#Here we run the PAM algorithm (like k-means) on the best "k"
+pam_fit <- pam(d, diss=TRUE, k=2)
+
+pam_results<-gowclean %>% mutate(cluster=pam_fit$clustering) %>% group_by(cluster) %>% do(the_summary = summary(.))
+
+#shows us the vital stats of each one of these clusters
+pam_results$the_summary
+
+#visualize medoids to see the centers of each cluster
+gowclean[pam_fit$medoids,]
+
+#Need to quick-install Rtsne to get these clusters going - I've commented out to drop-in
+
+#Generates a plot of all 3 clusters over-lapped.
+tsne_obj<-Rtsne(d,is_distance=TRUE)
+tsne_data <- tsne_obj$Y %>% data.frame() %>% setNames(c("X","Y")) %>% mutate(cluster=factor(pam_fit$clustering),name=gowclean$pickup_area)
+ggplot(aes(x=X, y=Y), data=tsne_data) +
+  geom_point(aes(color=cluster))
+
+##Now, we strip out the powerful pickups (Near North Side, Loop)
+#Creates new gower model data
+gownew <- data.frame(kprep)
+
+#Creates a new filter to strip out the two pickups NNS and Loop
+gownew <- gownew %>% filter(pickup_area!="Near North Side" & pickup_area!="Loop")
+
+gownew<-gownew[sample(nrow(gownew), 7000), ]
+#gownew$extras<-NULL
+
+#d is a dissimilarity, which needs to be made into a matrix for future ops
+d2 <- daisy(gownew, metric="gower")
+
+d2_mat <- as.matrix(d2)
+
+#Shows us the two "most similar" entries
+gownew[which(d2_mat==min(d2_mat[d2_mat!=min(d2_mat)]),
+                arr.ind=TRUE)[1, ],]
+
+#Shows us the two "least similar" entries
+gownew[which(d2_mat==max(d2_mat[d2_mat!=max(d2_mat)]),
+               arr.ind=TRUE)[1,],]
+
+
+## What follows is a series of things to a) select best k and b) fit them to the 
+sil_widthe <- c(NA)
+
+for (i in 2:10) {
+  pam2_fit <- pam(d2, diss=TRUE, k=i)
+  sil_widthe[i]<-pam2_fit$silinfo$avg.width
+}
+
+##This plots the Number of Clusters vs. Silhouette Width, a measure similarity of a and neighbor b
+plot(1:10, sil_widthe, xlab="Number of Clusters", ylab="Silhouette Width")
+lines(1:10, sil_widthe)
+```
+
+The graph shows us that the optimal number of clusters is 2.
+
+```{r}
+#Here we run the PAM algorithm (like k-means) on the best "k" - This Chart shows us 6 clusters
+pam2_fit <- pam(d2, diss=TRUE, k=2)
+
+pam2_results<-gownew %>% mutate(cluster=pam2_fit$clustering) %>% group_by(cluster) %>% do(the_summary = summary(.))
+
+#shows us the vital stats of each one of these clusters
+pam2_results$the_summary
+
+#visualize medoids to see the centers of each cluster
+gownew[pam2_fit$medoids,]
+
+#Generates a plot of all 6 clusters over-lapped.
+tsne2_obj<-Rtsne(d2,is_distance=TRUE)
+tsne2_data <- tsne2_obj$Y %>% data.frame() %>% setNames(c("X","Y")) %>% mutate(cluster=factor(pam2_fit$clustering),name=gownew$pickup_area)
+ggplot(aes(x=X, y=Y), data=tsne2_data) +
+  geom_point(aes(color=cluster))
+
+
 ```
