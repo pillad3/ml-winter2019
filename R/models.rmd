@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm","rattle")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(1000000)
+data1m <- taxiData(2000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -218,7 +218,7 @@ phatT=list()
 phatV=list()
 
 idv = c(1,3)
-ntv = c(250,500,1000,2000)
+ntv = c(250,500,1000)
 shv = c(.01,.04)
 setboost = expand.grid(idv,ntv,shv)
 
@@ -251,24 +251,24 @@ for(i in 1:nrow(setboost)) {
   errorValidate[i]=sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
 }
 
-errors = list()
-nmethod = ncol(phatV)
-for(i in 1:nmethod) {
-  nrun = ncol(phatV[[i]])
-  lvec = rep(0,nrun)
-  for(j in 1:nrun) lvec[j] = sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
-  lossL[[i]]=lvec; names(lossL)[i] = names(phatV)[i]
-}
-lossv = unlist(lossL)
+#errors = list()
+#nmethod = ncol(phatV)
+#for(i in 1:nmethod) {
+#  nrun = ncol(phatV[[i]])
+#  lvec = rep(0,nrun)
+#  for(j in 1:nrun) lvec[j] = sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
+#  lossL[[i]]=lvec; names(lossL)[i] = names(phatV)[i]
+#}
+#lossv = unlist(lossL)
 
-par(mfrow=c(1,1))
-plot(lossv, ylab="loss on validation", type="n")
-nloss=0
-for(i in 1:nmethod) {
-ii = nloss + 1:ncol(phatV[[i]])
-points(ii,lossv[ii],col=i,pch=17)
-nloss = nloss + ncol(phatV[[i]])
-}
+#par(mfrow=c(1,1))
+#plot(lossv, ylab="loss on validation", type="n")
+#nloss=0
+#for(i in 1:nmethod) {
+#ii = nloss + 1:ncol(phatV[[i]])
+#points(ii,lossv[ii],col=i,pch=17)
+#nloss = nloss + ncol(phatV[[i]])
+#}
 
 
 ```
