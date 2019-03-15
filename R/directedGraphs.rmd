@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(1500000)
+data1m <- taxiData(3000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 df$dropoff_community_area<-as.factor(df$dropoff_community_area)

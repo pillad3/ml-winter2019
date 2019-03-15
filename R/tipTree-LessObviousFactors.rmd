@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(2000000)
+data1m <- taxiData(1000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -111,7 +111,7 @@ levels(df$pickup_area_group)<-c(levels(topPickup05Perc$pickup_area),"Other")
 
 #Do the same thing for company to reduce the number of factor levels
 topCompany <- df %>% drop_na(c("company")) %>% dplyr::group_by(company) %>% tally(sort=TRUE)
-topCompany05Perc <- topCompany[topCompany$n>(.005*nrow(drop_na(df,c("company")))),]
+topCompany05Perc <- topCompany[topCompany$n>(.001*nrow(drop_na(df,c("company")))),]
 
 topCompany05Perc$company <- droplevels(topCompany05Perc$company)
 #Add levels, including one for "Other"
@@ -119,12 +119,17 @@ df$company_group <- as.factor(ifelse(!df$company %in% topCompany05Perc$company,"
 levels(df$company_group)<-c(levels(topCompany05Perc$company),"Other")
 
 #Filter on the following columns--drop all rows where NA encountered in any column
-colFilter <- c("company_group","payment_type","tips","trip_miles","trip_seconds","Pop16Plus","IN_LBFRC","UNEMP","MedIncome","endDay","endMonth","endHour","LaborPart","pickup_area_group","fare")
+colFilter <- c("company_group","payment_type","tips","UNEMP","MedIncome","endDay","endMonth","endHour","LaborPart","pickup_area_group","fare","trip_total","trip_seconds")
+
 dfSlim <- df[colFilter] %>% drop_na()
 #Drop records where fare is below the min, likely bad
-dfSlim <- dfSlim[dfSlim$fare>=3.25,]
-#Drop fare since obviously large fares will drive large tips
-dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare"))]
+dfSlim <- dfSlim[dfSlim$trip_total>=3.25,]
+#Drop records where duration =0
+dfSlim <- dfSlim[dfSlim$trip_seconds > 0,]
+dfSlim$totalPerMin<-dfSlim$trip_total/(dfSlim$trip_seconds/60)
+#Drop fare, tips, time
+dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare","trip_seconds","tips","trip_total"))]
+
 cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe. Leaves ", nrow(dfSlim)," total records.")
 #rm(df)
 #gc()
@@ -147,15 +152,17 @@ Let's measure RMSE using the same training and validation data sets for a linaer
 
 ```{r, "Logistic Regression - fare"}
 #logistic regression, y=FALSE and model=FALSE to save memory
-lgfit = glm(tips~.,trainSample,family="gaussian",y=FALSE,model=TRUE)
+lgfit = glm(totalPerMin~.,trainSample,family="gaussian",y=FALSE,model=TRUE)
 
 phat_t = predict(lgfit, trainSample, type="response")
 phat_v = predict(lgfit, validateSample, type="response")
 
-errorTrain = sqrt(mean((phat_t-trainSample$tips)^2))
-errorValidate = sqrt(mean((phat_v-validateSample$tips)^2))
+errorTrain = sqrt(mean((phat_t-trainSample$totalPerMin)^2))
+errorValidate = sqrt(mean((phat_v-validateSample$totalPerMin)^2))
 
-cat("Linear Regression Training error: $",round(errorTrain,2))
+
+cat("Avg trip total per min: $",round(mean(dfSlim$totalPerMin),2))
+cat("\nLinear Regression Training error: $",round(errorTrain,2))
 cat("\nLinear Regression Validation error: $",round(errorValidate,2))
 ```
 # Trees
@@ -167,12 +174,12 @@ One hypothesis is that there are different subsets of riders which we may be abl
 * time of ride
 * day of ride
 
-We will use tree-based models to model tips as well as fares
+We will use tree-based models to model trip total per minute
 
 
 We will construct a big tree to start.
 ```{r}
-big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=1000,cp=0.001,xval=10))
+big_tree = rpart(totalPerMin~., data=trainSample, control=rpart.control(minsplit=10,cp=0.00001,xval=10))
 nbig = length(unique(big_tree$where)) 
 
 cat('size of big tree: ',nbig,'\n')
@@ -199,77 +206,16 @@ for(i in 1:ntree) {
   temptree = prune(big_tree,cp=cpvec[i])
   tree_size[i] = length(unique(temptree$where))
  
-  errorTrain[i]=sqrt(mean((predict(temptree,newdata=trainSample)-trainSample$tips)^2))
-  errorValidate[i]=sqrt(mean((predict(temptree,newdata=validateSample)-validateSample$tips)^2))
+  errorTrain[i]=sqrt(mean((predict(temptree,newdata=trainSample)-trainSample$totalPerMin)^2))
+  errorValidate[i]=sqrt(mean((predict(temptree,newdata=validateSample)-validateSample$totalPerMin)^2))
 }
 
 ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) +  geom_line(aes(x=tree_size,y=errorTrain,color="train"))+  scale_colour_manual(breaks = c("Validate"="blue", "Train"="green"),values = c("blue", "green")) + ggtitle("Tree Performance")+xlab("Tree Size")+ylab("RMSE")
 
 plotcp(big_tree,upper="size")
+fancyRpartPlot(big_tree)
+sink("rules.txt")
+rattle::asRules(big_tree,TRUE)
+sink()
 ```
-This indicates that the tip predictions from an 80-node tree have an error of roughly ~$0.60 per trip. ~0.5 at 375 nodes. 
-
-So far logistic regressions look better for modeling tips--let's try using boosting.
-
-## Trees with Boosting
-When boosting we also want to try various combinations of model parameters (tree depth, number of trees, and shrinkage). For tree depth be try 1, 2, and 3. For number of trees we try 3 values from 500 to 1000 and for the shrinkage parameter we try values from .02 and .04.
-```{r}
-phatT=list()
-phatV=list()
-
-idv = c(1,3)
-ntv = c(250,500,1000)
-shv = c(.01,.04)
-setboost = expand.grid(idv,ntv,shv)
-
-colnames(setboost) = c("tdepth","ntree","shrink")
-phatV$boost = matrix(0.0,nrow(validateSample),nrow(setboost))
-phatT$boost = matrix(0.0,nrow(trainSample),nrow(setboost))
-tdB=trainSample
-vdB=validateSample;
-
-for(i in 1:nrow(setboost)) {
-tic()
-##fit and predict
-cat('Now i=',i ,'/',nrow(setboost), ', ')
-fboost = gbm(tips~., data=tdB, distribution="gaussian",
-  n.trees=setboost[i,2],
-  interaction.depth=setboost[i,1],
-  shrinkage=setboost[i,3])
-phatV$boost[,i] = predict(fboost,newdata=vdB,n.trees=setboost[i,2],type="response")
-phatT$boost[,i] = predict(fboost,newdata=tdB,n.trees=setboost[i,2],type="response")
-toc()
-}
-```
-Calculate train and validation error under
-```{r}
-errorTrain=rep(0,nrow(setboost))
-errorValidate=rep(0,nrow(setboost))
-
-for(i in 1:nrow(setboost)) {
-  errorTrain[i]=sqrt(mean((phatT$boost[,i]-trainSample$tips)^2))
-  errorValidate[i]=sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
-}
-
-#errors = list()
-#nmethod = ncol(phatV)
-#for(i in 1:nmethod) {
-#  nrun = ncol(phatV[[i]])
-#  lvec = rep(0,nrun)
-#  for(j in 1:nrun) lvec[j] = sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
-#  lossL[[i]]=lvec; names(lossL)[i] = names(phatV)[i]
-#}
-#lossv = unlist(lossL)
-
-#par(mfrow=c(1,1))
-#plot(lossv, ylab="loss on validation", type="n")
-#nloss=0
-#for(i in 1:nmethod) {
-#ii = nloss + 1:ncol(phatV[[i]])
-#points(ii,lossv[ii],col=i,pch=17)
-#nloss = nloss + ncol(phatV[[i]])
-#}
-
-
-```
-
+The error flatlines here--likely reflects the fact that we are excluding the major drivers of tip which are fare, distance, time. It might be better to look at tip or fare per minute.
