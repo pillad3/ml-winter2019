@@ -43,7 +43,7 @@ Load data and begin generating exploratory plots.
 ```{r,"Load Data"}
 source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(1000000)
+data1m <- taxiData(2000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 gc()
@@ -126,7 +126,7 @@ dfSlim <- df[colFilter] %>% drop_na()
 dfSlim <- dfSlim[dfSlim$trip_total>=3.25,]
 #Drop records where duration =0
 dfSlim <- dfSlim[dfSlim$trip_seconds > 0,]
-dfSlim$totalPerMin<-dfSlim$trip_total/(dfSlim$trip_seconds/60)
+dfSlim$dollarsPerHour<-dfSlim$trip_total/(dfSlim$trip_seconds/(60*60))
 #Drop fare, tips, time
 dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare","trip_seconds","tips","trip_total"))]
 
@@ -151,17 +151,21 @@ validateSample <- dfTree[-train_ind,]
 Let's measure RMSE using the same training and validation data sets for a linaer regression model.
 
 ```{r, "Logistic Regression - fare"}
+phatT=list()
+phatV=list()
+phatT$logist = matrix(0.0,nrow(trainSample),1)
+phatV$logist = matrix(0.0,nrow(validateSample),1)
 #logistic regression, y=FALSE and model=FALSE to save memory
-lgfit = glm(totalPerMin~.,trainSample,family="gaussian",y=FALSE,model=TRUE)
+lgfit = glm(dollarsPerHour~.,trainSample,family="gaussian",y=FALSE,model=TRUE)
 
-phat_t = predict(lgfit, trainSample, type="response")
-phat_v = predict(lgfit, validateSample, type="response")
+phatT$logist = predict(lgfit, trainSample, type="response")
+phatV$logist = predict(lgfit, validateSample, type="response")
 
-errorTrain = sqrt(mean((phat_t-trainSample$totalPerMin)^2))
-errorValidate = sqrt(mean((phat_v-validateSample$totalPerMin)^2))
+errorTrain = sqrt(mean((phatT$logist-trainSample$dollarsPerHour)^2))
+errorValidate = sqrt(mean((phatV$logist-validateSample$dollarsPerHour)^2))
 
 
-cat("Avg trip total per min: $",round(mean(dfSlim$totalPerMin),2))
+cat("Avg trip total per min: $",round(mean(dfSlim$dollarsPerHour),2))
 cat("\nLinear Regression Training error: $",round(errorTrain,2))
 cat("\nLinear Regression Validation error: $",round(errorValidate,2))
 ```
@@ -179,7 +183,7 @@ We will use tree-based models to model trip total per minute
 
 We will construct a big tree to start.
 ```{r}
-big_tree = rpart(totalPerMin~., data=trainSample, control=rpart.control(minsplit=10,cp=0.00001,xval=10))
+big_tree = rpart(dollarsPerHour~., data=trainSample, control=rpart.control(minsplit=50,cp=0.00001,xval=10))
 nbig = length(unique(big_tree$where)) 
 
 cat('size of big tree: ',nbig,'\n')
@@ -189,15 +193,21 @@ cptable = printcp(big_tree)
 (index_cp_min = which.min(cptable[,"xerror"]))
 (cp_min = cptable[ index_cp_min, "CP" ])   
 
+# one standard deviation rule 
+# need to find first cp value for which the xerror is below horizontal line on the plot
 (val_h = cptable[index_cp_min, "xerror"] + cptable[index_cp_min, "xstd"])
 (index_cp_std = Position(function(x) x < val_h, cptable[, "xerror"]))
-(cp_std = cptable[ index_cp_std, "CP" ])   
+(cp_std = cptable[ index_cp_std, "CP" ])  
+optimal.tree = prune(big_tree, cp=big_tree$cptable[6])
 ```
 We then prune back this big tree for a range of different CP, calculating the misclassification rate and loss as a function of tree size for both our training and validation data.
 ```{r}
 cpvec = big_tree$cptable[,"CP"]
 ntree = length(cpvec)
 tree_size = rep(0,ntree)
+
+phatT$logist = matrix(0.0,nrow(trainSample),ntree)
+phatV$logist = matrix(0.0,nrow(validateSample),ntree)
 
 errorTrain=rep(0,ntree)
 errorValidate=rep(0,ntree)
@@ -206,16 +216,84 @@ for(i in 1:ntree) {
   temptree = prune(big_tree,cp=cpvec[i])
   tree_size[i] = length(unique(temptree$where))
  
-  errorTrain[i]=sqrt(mean((predict(temptree,newdata=trainSample)-trainSample$totalPerMin)^2))
-  errorValidate[i]=sqrt(mean((predict(temptree,newdata=validateSample)-validateSample$totalPerMin)^2))
+  phatT$logist = predict(temptree,newdata=trainSample)
+  phatV$logist = predict(temptree,newdata=validateSample)
+  
+  errorTrain[i]=sqrt(mean((phatT$logist - trainSample$dollarsPerHour)^2))
+  errorValidate[i]=sqrt(mean((phatV$logist - validateSample$dollarsPerHour)^2))
 }
 
 ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) +  geom_line(aes(x=tree_size,y=errorTrain,color="train"))+  scale_colour_manual(breaks = c("Validate"="blue", "Train"="green"),values = c("blue", "green")) + ggtitle("Tree Performance")+xlab("Tree Size")+ylab("RMSE")
 
 plotcp(big_tree,upper="size")
 fancyRpartPlot(big_tree)
-sink("rules.txt")
-rattle::asRules(big_tree,TRUE)
+fancyRpartPlot(optimal.tree)
+##Print rules to file
+sink("rules - Big Tree.txt")
+rattle::asRules(big_tree,compact=FALSE)
+sink()
+sink("rules - optimal pruned tree.txt")
+rattle::asRules(optimal.tree,compact=FALSE)
 sink()
 ```
 The error flatlines here--likely reflects the fact that we are excluding the major drivers of tip which are fare, distance, time. It might be better to look at tip or fare per minute.
+
+## Trees with Boosting
+When boosting we also want to try various combinations of model parameters (tree depth, number of trees, and shrinkage). For tree depth be try 1, 2, and 3. For number of trees we try 3 values from 500 to 1000 and for the shrinkage parameter we try values from .02 and .04.
+```{r}
+idv = c(1,3)
+ntv = c(250)
+shv = c(.005,.01,.02)
+setboost = expand.grid(idv,ntv,shv)
+
+colnames(setboost) = c("tdepth","ntree","shrink")
+phatV$boost = matrix(0.0,nrow(validateSample),nrow(setboost))
+phatT$boost = matrix(0.0,nrow(trainSample),nrow(setboost))
+tdB=trainSample
+vdB=validateSample;
+
+for(i in 1:nrow(setboost)) {
+tic()
+##fit and predict
+cat('Now i=',i ,'/',nrow(setboost), ', ')
+fboost = gbm(dollarsPerHour~., data=tdB, distribution="gaussian",
+  n.trees=setboost[i,2],
+  interaction.depth=setboost[i,1],
+  shrinkage=setboost[i,3])
+
+phatT$boost[,i] = predict(fboost,newdata=tdB,n.trees=setboost[i,2],type="response")
+phatV$boost[,i] = predict(fboost,newdata=vdB,n.trees=setboost[i,2],type="response")
+toc()
+}
+```
+Calculate train and validation error under
+```{r}
+errorTrain=rep(0,nrow(setboost))
+errorValidate=rep(0,nrow(setboost))
+cat("test")
+for(i in 1:nrow(setboost)) {
+  errorTrain[i]=sqrt(mean((phatT$boost[,i]-trainSample$dollarsPerHour)^2))
+  cat('\nBoosting model ',i,' training error:',errorTrain[i])
+  errorValidate[i]=sqrt(mean((phatV$boost[,i]-validateSample$dollarsPerHour)^2))
+  cat('\nBoosting model ',i,' validation error:',errorValidate[i])
+}
+
+#errors = list()
+#nmethod = ncol(phatV)
+#for(i in 1:nmethod) {
+#  nrun = ncol(phatV[[i]])
+#  lvec = rep(0,nrun)
+#  for(j in 1:nrun) lvec[j] = sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
+#  lossL[[i]]=lvec; names(lossL)[i] = names(phatV)[i]
+#}
+#lossv = unlist(lossL)
+
+#par(mfrow=c(1,1))
+#plot(lossv, ylab="loss on validation", type="n")
+#nloss=0
+#for(i in 1:nmethod) {
+#ii = nloss + 1:ncol(phatV[[i]])
+#points(ii,lossv[ii],col=i,pch=17)
+#nloss = nloss + ncol(phatV[[i]])
+#}
+```

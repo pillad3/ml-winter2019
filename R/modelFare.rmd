@@ -124,7 +124,7 @@ dfSlim <- df[colFilter] %>% drop_na()
 #Drop records where fare is below the min, likely bad
 dfSlim <- dfSlim[dfSlim$fare>=3.25,]
 #Drop fare since obviously large fares will drive large tips
-#dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare"))]
+dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare"))]
 cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe. Leaves ", nrow(dfSlim)," total records.")
 #rm(df)
 #gc()
@@ -147,7 +147,7 @@ Let's measure RMSE using the same training and validation data sets for a linaer
 
 ```{r, "Logistic Regression - fare"}
 #logistic regression, y=FALSE and model=FALSE to save memory
-lgfit = glm(tips~.,trainSample,family="gaussian")
+lgfit = glm(tips~.,trainSample,family="gaussian",y=FALSE,model=TRUE)
 
 phat_t = predict(lgfit, trainSample, type="response")
 phat_v = predict(lgfit, validateSample, type="response")

@@ -318,16 +318,27 @@ tipStatsByTaxi <- df %>% drop_na(c("tips")) %>% dplyr::group_by(taxi=taxi_id) %>
    summarize(AvgTip=mean(tips),MedianTip=median(tips),MaxTip=max(tips),Trips=n()) %>% arrange(desc(Trips))
 tipStatsByTaxi
 ```{r}
-tipStatsByPickup <- df %>% drop_na(c("tips","trip_seconds","pickup_area")) %>% dplyr::group_by(pickup_area) %>% 
+tipStatsByPickup <- df %>% drop_na() %>% filter(fare>0) %>% filter(fare<900) %>% dplyr::group_by(pickup_area) %>% 
    filter(n()>100) %>% filter(trip_seconds>0)  %>%
    summarize(AvgTip=round(mean(tips),2),
-             AvgTipPerMin=round(mean(tips/(trip_seconds/60)),2),
              MedianTip=median(tips),
-             MedianTipPerMin=round(median(tips/(trip_seconds/60)),2),
              MaxTip=max(tips),
-             NoTip=sum(ifelse(tips==0,1,0)),
-             PercentTip=round(100*(sum(ifelse(tips==0,0,1)))/n(),1),
-             Trips=n()) %>% 
-  arrange(desc(PercentTip))
+             tipPercentFare=round(100*mean(tips/fare),1),
+             PercentRideswTip=round(100*(sum(ifelse(tips==0,0,1)))/n(),1),
+             trips=n(),
+             percent_trips=round(100*n()/nrow(df),5)) %>% 
+  filter(trips>100) %>%arrange(desc(PercentRideswTip))
 tipStatsByPickup
+
+tipStatsByPickupAvg <- df %>% drop_na() %>% filter(fare>0) %>% filter(fare<900) %>% dplyr::group_by(pickup_area) %>% 
+   filter(n()>100) %>% filter(trip_seconds>0)  %>%
+   summarize(AvgTip=round(mean(tips),2),
+             MedianTip=median(tips),
+             MaxTip=max(tips),
+             tipPercentFare=round(100*mean(tips/fare),1),
+             PercentRideswTip=round(100*(sum(ifelse(tips==0,0,1)))/n(),1),
+             trips=n(),
+             percent_trips=round(100*n()/nrow(df),5)) %>% 
+    filter(trips>100) %>% arrange(desc(tipPercentFare))
+tipStatsByPickupAvg
 ```

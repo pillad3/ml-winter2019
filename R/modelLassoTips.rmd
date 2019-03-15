@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm","rattle")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm","rattle","stringr","glmnet")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -90,8 +90,11 @@ df$company[df$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago E
 df$startDate <- date(df$trip_start_timestamp)
 df$endDate <- date(df$trip_end_timestamp)
 df$endDay <- wday(df$trip_end_timestamp,label=TRUE)
+df$endDay <- factor(df$endDay,ordered=FALSE)
 df$endMonth <- month(df$trip_end_timestamp,label=TRUE)
+df$endMonth <- factor(df$endMonth,ordered=FALSE)
 df$endHour <- hour(str_replace(df$trip_end_timestamp,"T"," "))
+df$endHour <- factor(df$endHour,ordered=FALSE)
 #Replace <NA> with string "NA" which can be used for grouping
 df$company <- fct_explicit_na(df$company,"NA") 
 df$LaborPart <- ((df$IN_LBFRC-df$UNEMP)/df$IN_LBFRC)
@@ -102,7 +105,7 @@ Throw out all rows where NAs exist for dropoff/pickup location and other fields 
 ```{r, "Create slim dataset for modeling"}
 #Calculate # trips by area and order, most to least. Pick out those with at least 0.5% of trips. 
 topPickup <- df %>% drop_na(c("pickup_area")) %>% dplyr::group_by(pickup_area) %>% tally(sort=TRUE)
-topPickup05Perc <- topPickup[topPickup$n>(.005*nrow(drop_na(df,c("pickup_area")))),]
+topPickup05Perc <- topPickup[topPickup$n>(.002*nrow(drop_na(df,c("pickup_area")))),]
 #Remove unused levels
 topPickup05Perc$pickup_area <- droplevels(topPickup05Perc$pickup_area)
 #Add levels, including one for "Other"
@@ -119,10 +122,10 @@ df$company_group <- as.factor(ifelse(!df$company %in% topCompany05Perc$company,"
 levels(df$company_group)<-c(levels(topCompany05Perc$company),"Other")
 
 #Filter on the following columns--drop all rows where NA encountered in any column
-colFilter <- c("company_group","payment_type","tips","trip_miles","trip_seconds","Pop16Plus","IN_LBFRC","UNEMP","MedIncome","endDay","endMonth","endHour","LaborPart","pickup_area_group","fare")
+colFilter <- c("company_group","payment_type","tips","trip_miles","trip_seconds","endDay","endMonth","endHour","pickup_area_group","fare","MedIncome","LaborPart")
 dfSlim <- df[colFilter] %>% drop_na()
 #Drop records where fare is below the min, likely bad
-dfSlim <- dfSlim[dfSlim$fare>=3.25,]
+dfSlim <- dfSlim[dfSlim$fare>0,]
 #Drop fare since obviously large fares will drive large tips
 #dfSlim <- dfSlim[,-which(names(dfSlim) %in% c("fare"))]
 cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe. Leaves ", nrow(dfSlim)," total records.")
@@ -141,135 +144,68 @@ train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
 trainSample <- dfTree[train_ind,] #drop the final redundant dummy var for target_control
 validateSample <- dfTree[-train_ind,]
 ```
-# Regression
+# Lassos
 
-Let's measure RMSE using the same training and validation data sets for a linaer regression model.
+We will test the lasso (alpha=1) and elastic net (alpha=0.5). When using lambda.1se, the lasso's L1 penalty leaves on 6 factors while lambda.min returns many more (>50)
 
-```{r, "Logistic Regression - fare"}
-#logistic regression, y=FALSE and model=FALSE to save memory
-lgfit = glm(tips~.,trainSample,family="gaussian")
+```{r, "Lasso Tips"}
+library(dplyr)
 
-phat_t = predict(lgfit, trainSample, type="response")
-phat_v = predict(lgfit, validateSample, type="response")
+vars_name <- trainSample[,-which(names(trainSample) %in% c("tips"))] %>% 
+  select_if(function(col) is.factor(col) | is.numeric(col)) %>% 
+  colnames() %>% 
+  str_c(collapse = "+") 
+model_string <- paste("tips  ~",vars_name )
 
-errorTrain = sqrt(mean((phat_t-trainSample$tips)^2))
-errorValidate = sqrt(mean((phat_v-validateSample$tips)^2))
+x_train <- model.matrix(as.formula(model_string), trainSample)
 
-cat("Linear Regression Training error: $",round(errorTrain,2))
-cat("\nLinear Regression Validation error: $",round(errorValidate,2))
+lasso_cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "gaussian", alpha=0, standardize=TRUE, nfolds=10)
+plot(lasso_cv)
+lasso <- glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "gaussian", alpha=0, standardize=TRUE,intercept = TRUE)
+
+
+c<-coef(lasso_cv,s='lambda.1se',exact=TRUE)
+inds<-which(c!=0)
+variables<-row.names(c)[inds]
+betas<-c[inds]
+cbind(variables,round(betas,6))
+
+plot(lasso)
+plot(lasso, xvar = "lambda", label = TRUE)
+
 ```
-# Trees
+```{r, "Elastic Net Tips"}
+library(dplyr)
 
-One hypothesis is that there are different subsets of riders which we may be able to identify based upon:
-* pickup location
-* dropoff location
-* pickup area demographic attributes
-* time of ride
-* day of ride
+vars_name <- trainSample[,-which(names(trainSample) %in% c("tips"))] %>% 
+  select_if(function(col) is.factor(col) | is.numeric(col)) %>% 
+  colnames() %>% 
+  str_c(collapse = "+") 
+model_string <- paste("tips  ~",vars_name )
 
-We will use tree-based models to model tips as well as fares
+x_train <- model.matrix(as.formula(model_string), trainSample)
 
+lasso_cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "gaussian", alpha=0, standardize=TRUE, nfolds=10)
+plot(lasso_cv)
+lasso <- glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "gaussian", alpha=0, standardize=TRUE,intercept = TRUE)
 
-We will construct a big tree to start.
-```{r}
-big_tree = rpart(tips~., data=trainSample, control=rpart.control(minsplit=1000,minbucket=10,cp=0.001,xval=10))
-nbig = length(unique(big_tree$where)) 
-
-cat('size of big tree: ',nbig,'\n')
-
-cptable = printcp(big_tree)
-# this is the cp parameter with smallest cv-errror
-(index_cp_min = which.min(cptable[,"xerror"]))
-(cp_min = cptable[ index_cp_min, "CP" ])   
-
-(val_h = cptable[index_cp_min, "xerror"] + cptable[index_cp_min, "xstd"])
-(index_cp_std = Position(function(x) x < val_h, cptable[, "xerror"]))
-(cp_std = cptable[ index_cp_std, "CP" ])   
-```
-We then prune back this big tree for a range of different CP, calculating the misclassification rate and loss as a function of tree size for both our training and validation data.
-```{r}
-cpvec = big_tree$cptable[,"CP"]
-ntree = length(cpvec)
-tree_size = rep(0,ntree)
-
-errorTrain=rep(0,ntree)
-errorValidate=rep(0,ntree)
-
-for(i in 1:ntree) {
-  temptree = prune(big_tree,cp=cpvec[i])
-  tree_size[i] = length(unique(temptree$where))
- 
-  errorTrain[i]=sqrt(mean((predict(temptree,newdata=trainSample)-trainSample$tips)^2))
-  errorValidate[i]=sqrt(mean((predict(temptree,newdata=validateSample)-validateSample$tips)^2))
+a <- seq(0.1, 0.9, 0.05)
+search <- foreach(i = a, .combine = rbind) %dopar% {
+  cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "gaussian", standardize=TRUE,intercept = TRUE, alpha = i)
+  data.frame(cvm = cv$cvm[cv$lambda == cv$lambda.1se], lambda.1se = cv$lambda.1se, alpha = i)
 }
+cv3 <- search[search$cvm == min(search$cvm), ]
+md3 <- glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "gaussian", standardize=TRUE,intercept = TRUE, lambda = cv3$lambda.1se, alpha = cv3$alpha)
+c<-coef(md3)
 
-ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) +  geom_line(aes(x=tree_size,y=errorTrain,color="train"))+  scale_colour_manual(breaks = c("Validate"="blue", "Train"="green"),values = c("blue", "green")) + ggtitle("Tree Performance")+xlab("Tree Size")+ylab("RMSE")
+inds<-which(c!=0)
+variables<-row.names(c)[inds]
+betas<-c[inds]
+cbind(variables,round(betas,6))
 
-plotcp(big_tree,upper="size")
-```
-This indicates that the tip predictions from an 80-node tree have an error of roughly ~$0.60 per trip. ~0.5 at 375 nodes. 
-
-So far logistic regressions look better for modeling tips--let's try using boosting.
-
-## Trees with Boosting
-When boosting we also want to try various combinations of model parameters (tree depth, number of trees, and shrinkage). For tree depth be try 1, 2, and 3. For number of trees we try 3 values from 500 to 1000 and for the shrinkage parameter we try values from .02 and .04.
-```{r}
-phatT=list()
-phatV=list()
-
-idv = c(1,3)
-ntv = c(250,500,1000)
-shv = c(.01,.04)
-setboost = expand.grid(idv,ntv,shv)
-
-colnames(setboost) = c("tdepth","ntree","shrink")
-phatV$boost = matrix(0.0,nrow(validateSample),nrow(setboost))
-phatT$boost = matrix(0.0,nrow(trainSample),nrow(setboost))
-tdB=trainSample
-vdB=validateSample;
-
-for(i in 1:nrow(setboost)) {
-tic()
-##fit and predict
-cat('Now i=',i ,'/',nrow(setboost), ', ')
-fboost = gbm(tips~., data=tdB, distribution="gaussian",
-  n.trees=setboost[i,2],
-  interaction.depth=setboost[i,1],
-  shrinkage=setboost[i,3])
-phatV$boost[,i] = predict(fboost,newdata=vdB,n.trees=setboost[i,2],type="response")
-phatT$boost[,i] = predict(fboost,newdata=tdB,n.trees=setboost[i,2],type="response")
-toc()
-}
-```
-Calculate train and validation error under
-```{r}
-errorTrain=rep(0,nrow(setboost))
-errorValidate=rep(0,nrow(setboost))
-
-for(i in 1:nrow(setboost)) {
-  errorTrain[i]=sqrt(mean((phatT$boost[,i]-trainSample$tips)^2))
-  errorValidate[i]=sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
-}
-
-#errors = list()
-#nmethod = ncol(phatV)
-#for(i in 1:nmethod) {
-#  nrun = ncol(phatV[[i]])
-#  lvec = rep(0,nrun)
-#  for(j in 1:nrun) lvec[j] = sqrt(mean((phatV$boost[,i]-validateSample$tips)^2))
-#  lossL[[i]]=lvec; names(lossL)[i] = names(phatV)[i]
-#}
-#lossv = unlist(lossL)
-
-#par(mfrow=c(1,1))
-#plot(lossv, ylab="loss on validation", type="n")
-#nloss=0
-#for(i in 1:nmethod) {
-#ii = nloss + 1:ncol(phatV[[i]])
-#points(ii,lossv[ii],col=i,pch=17)
-#nloss = nloss + ncol(phatV[[i]])
-#}
-
+plot(md3)
+plot(md3, xvar = "lambda", label = TRUE)
 
 ```
+
 
