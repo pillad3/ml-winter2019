@@ -41,9 +41,9 @@ set.seed(1) #Always set the seed for reproducibility
 Load data and begin generating exploratory plots.
 
 ```{r}
-source("R/taxiData.R")
+source("taxiData.R")
 #Load records from taxi data source and store as a dataframe
-data1m <- taxiData(2000000)
+data1m <- taxiData(5000000)
 df <- data.frame(data1m$rawData)
 rm(data1m) #Drop old data
 df$dropoff_community_area<-as.factor(df$dropoff_community_area)
@@ -51,7 +51,7 @@ df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_locat
 df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
 df$trip_total<-as.numeric(df$trip_total)
 #Load census data by Chicago Community Area
-ccaData <- read.csv("R/ChicagoCCAData.csv")
+ccaData <- read.csv("ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
 #Look up name of pickup CCA and add to df
@@ -93,13 +93,43 @@ df$endMonth <- month(df$trip_end_timestamp,label=TRUE)
 df$endHour <- hour(str_replace(df$trip_end_timestamp,"T"," "))
 ```
 
-Throw out all rows where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
+Throw out all rows where fare, duration, or distance=0 and where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
 
 ```{r}
 #Uncomment the following line to drop all records where dropoff_area and pickup_area NA
 #df<-df %>% drop_na(c("dropoff_area","pickup_area"))
 #Replace <NA> with string "NA" which can be used for grouping
+nrowPreFilter=nrow(df)
+df <- df[df$fare>0,]
+df <- df[df$trip_miles>0,]
+df <- df[df$trip_seconds>0,]
+df <- df[df$trip_total>0,]
 df$company <- fct_explicit_na(df$company,"NA")
+
+cat("Filtering out records where fare,trip_miles,trip_seconds=0. Remaining records: ", round(100*nrow(df)/nrowPreFilter,1),"% of data. Leaves ", nrow(df)," total records.")
+```
+```{r}
+cat("After dropping records we want to add a column for total hourly rate earned by ride: trip_total/(trip_seconds/60*60)\n")
+cat("\nAdd a column for total hourly fare by ride: fare/(trip_seconds/60*60)\n")
+df$totalHourlyRate=df$trip_total*60*60/(df$trip_seconds)
+df$totalHourlyFare=df$fare*60*60/(df$trip_seconds)
+
+cat("The average hourly rate across all records is $",round(mean(df$totalHourlyRate, na.rm=TRUE),2)," per hour")
+cat("\nThe median hourly rate across all records is $",round(median(df$totalHourlyRate, na.rm=TRUE),2)," per hour")
+cat("\n\nThe average hourly fare across all records is $",round(mean(df$totalHourlyFare, na.rm=TRUE),2)," per hour")
+cat("\nThe median hourly fare across all records is $",round(median(df$totalHourlyFare, na.rm=TRUE),2)," per hour")
+cat("\n\nChicago cab rates: $3.25 flag pull, $2.25/mi, $0.25 per 36 secs.")
+cat("\nAssume 1 passenger:")
+cat("\nFare for a 1 hour trip for a cab sitting still: $",(3.25+.25*60*60/36))
+cat("\nFare for a 1 hour trip for a cab averaging 15mph: $",(3.25+.25*60*60/36+15*2.25))
+cat("\nFare for a 1 hour trip for a cab averaging 30mph: $",(3.25+.25*60*60/36+30*2.25))
+cat("\nFare for a 1 hour trip for a cab averaging 45mph: $",(3.25+.25*60*60/36+45*2.25))
+
+cat("\n\nAvg cab speed:",round(mean(df$trip_miles*60*60/df$trip_seconds,na.rm=TRUE),1),"mph")
+
+cat("\nA 1 hour trip for a cab averaging 16.5mph: $",round((3.25+.25*60*60/36+16.5*2.25),2))
+
+
 ```
 
 Maps Pickups vs. Income and Dropoffs vs. Income; expectation would be that pickups and dropoffs would be highly correlated with income.
@@ -151,6 +181,7 @@ Create summary tables
 ```{r}
 #Note: I am calling dplyr's functions directly to avoid issues with summarize
 #Trips by Company
+tibble.print_min=20
 df %>% dplyr::group_by(company) %>% tally(sort=TRUE)
 #Trips by Dropoff Area
 topDrop <- df %>% dplyr::group_by(dropoff_area) %>% tally(sort=TRUE)
@@ -163,18 +194,26 @@ topPickup
 #Avg Fare and Distance by Pickup Area
 df %>% dplyr::group_by(pickup_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
 #Avg Fare and Distance by Dropoff Area
-df %>% dplyr::group_by(dropoff_area) %>% dplyr::summarize(total_trips=n(),mean_fare = round(mean(fare,na.rm=TRUE),2),mean_distance=round(mean(trip_miles,na.rm=TRUE),1))
+df %>% dplyr::group_by(dropoff_area) %>% dplyr::summarize(total_trips=n(),percent_trips=round(100*n()/nrow(df),5),
+  median_fare = round(median(fare,na.rm=TRUE),2),
+  mean_distance=round(mean(trip_miles,na.rm=TRUE),1)
+  ) %>% arrange(desc(median_fare))
 #Avg Fare and Distance by Pickup and Dropoff Areas
-df %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),
+df %>% drop_na() %>% filter(fare<900) %>% dplyr::group_by(pickup_area,dropoff_area) %>% dplyr::summarize(total_trips=n(),
   mean_fare = round(mean(fare,na.rm=TRUE),2),
   median_fare = round(median(fare,na.rm=TRUE),2),
+  mean_hourly_rate = round(mean(totalHourlyRate,na.rm=TRUE),2),
+  mean_hourly_fare = round(mean(totalHourlyFare,na.rm=TRUE),2),
+  mean_tip=round(mean(tips,na.rm=TRUE),1),
+  mean_mph=round(mean(trip_miles*60*60/trip_seconds,na.rm=TRUE),1),
   min_fare=round(min(fare,na.rm=TRUE),2),
   max_fare=round(max(fare,na.rm=TRUE),2),
   mean_distance=round(mean(trip_miles,na.rm=TRUE),1),
   median_distance=round(median(trip_miles,na.rm=TRUE),1),
   min_distance=round(min(trip_miles,na.rm=TRUE),1),
-  max_distance=round(max(trip_miles,na.rm=TRUE),1)
-  )  %>% arrange(desc(mean_fare))
+  max_distance=round(max(trip_miles,na.rm=TRUE),1),
+  
+  )  %>% arrange(desc(total_trips))
 ```
 
 
