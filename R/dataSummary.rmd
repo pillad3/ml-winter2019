@@ -52,8 +52,8 @@ df$dropoff_community_area<-as.factor(df$dropoff_community_area)
 df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_location.coordinates)
 df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
 df$trip_total<-as.numeric(df$trip_total)
-df$tolls<-as.numeric(df$trip_total)
-df$extras<-as.numeric(df$trip_total)
+df$tolls<-as.numeric(df$tolls)
+df$extras<-as.numeric(df$extras)
 
 #Select only the columns we will be using
 colKeep<-c("company","pickup_community_area","dropoff_community_area","fare","tolls","extras","tips","payment_type","taxi_id","trip_miles","trip_seconds","trip_end_timestamp","trip_start_timestamp","trip_total","pickup_census_tract","dropoff_census_tract")
@@ -69,7 +69,8 @@ summaryNA <- as.data.frame(sapply(df,function(x) sum(is.na(x)))/nrow(df)*100)
 #% of records that are zero in each column
 summaryZero <- as.data.frame(colSums(df==0,na.rm=TRUE)/nrow(df)*100)
 
-cat("")
+cat("Summary of data with NA records in each column:")
+summaryNA
 
 #Drop all NA records for the following columns
 naFilter<-c("fare","tolls","extras","tips","trip_total","trip_seconds","trip_miles","trip_end_timestamp","dropoff_community_area","pickup_community_area")
@@ -89,6 +90,35 @@ numericCols <- c("fare","tolls","extras","tips","trip_total","trip_seconds","tri
 meltData <- melt(dfClean[,numericCols])
 p <- ggplot(meltData, aes(factor(variable), value)) 
 p + geom_boxplot() + facet_wrap(~variable, scale="free") + theme(axis.title=element_text(size=14,face="bold"))
+```
+
+Calculate mean, median, standard deviation
+```{r}
+#This will be a table in our paper, with st dev added
+summary(dfClean[,numericCols])
+
+sd(dfClean$fare)
+sd(dfClean$tolls)
+sd(dfClean$extras)
+sd(dfClean$tips)
+sd(dfClean$trip_total)
+sd(dfClean$trip_seconds)
+sd(dfClean$trip_miles)
+```
+We perform a final set of cuts to remove large outliers, or other nonsensical data. These include, fare>3.25, trip_total>3.25. This is because the minimum rate possible is simply a charge for the flag pull which costs 3.25. Furthermore, we will exclude all trips with a fare over 225 (the 99.99th percentile), all extras over $225, all trips less than 30 seconds, and all trips over 100 miles.
+
+```{r}
+dfClean2 <- dfClean
+dfClean2 <- dfClean2[dfClean2$fare>=3.25,]
+dfClean2 <- dfClean2[dfClean2$trip_total>=3.25,]
+dfClean2 <- dfClean2[dfClean2$fare<=225,]
+dfClean2 <- dfClean2[dfClean2$extras<=225,]
+dfClean2 <- dfClean2[dfClean2$trip_seconds>=30,]
+dfClean2 <- dfClean2[dfClean2$trip_miles<=100,]
+
+
+cat("After additional filtering ", round(100*(1-(nrow(dfClean2)/nrow(df))),1),"% of all records have been dropped")
+
 ```
 
 
