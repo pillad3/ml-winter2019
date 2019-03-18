@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","lemon")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","lemon","reshape","ggplot2")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -52,6 +52,8 @@ df$dropoff_community_area<-as.factor(df$dropoff_community_area)
 df$dropoff_centroid_location.coordinates<-as.character(df$dropoff_centroid_location.coordinates)
 df$pickup_centroid_location.coordinates<-as.character(df$pickup_centroid_location.coordinates)
 df$trip_total<-as.numeric(df$trip_total)
+df$tolls<-as.numeric(df$trip_total)
+df$extras<-as.numeric(df$trip_total)
 
 #Select only the columns we will be using
 colKeep<-c("company","pickup_community_area","dropoff_community_area","fare","tolls","extras","tips","payment_type","taxi_id","trip_miles","trip_seconds","trip_end_timestamp","trip_start_timestamp","trip_total","pickup_census_tract","dropoff_census_tract")
@@ -67,19 +69,27 @@ summaryNA <- as.data.frame(sapply(df,function(x) sum(is.na(x)))/nrow(df)*100)
 #% of records that are zero in each column
 summaryZero <- as.data.frame(colSums(df==0,na.rm=TRUE)/nrow(df)*100)
 
+cat("")
+
 #Drop all NA records for the following columns
 naFilter<-c("fare","tolls","extras","tips","trip_total","trip_seconds","trip_miles","trip_end_timestamp","dropoff_community_area","pickup_community_area")
-
 dfClean<-df[complete.cases(df[,naFilter]),]
 
 #Drop records where miles, seconds, fare <=0
 dfClean<-dfClean[dfClean$trip_miles>0,]
 dfClean<-dfClean[dfClean$trip_seconds>0,]
 dfClean<-dfClean[dfClean$fare>0,]
+dfClean<-dfClean[dfClean$trip_total>0,]
 
 cat("After dropping NA and zero records: ", round(100*(1-(nrow(dfClean)/nrow(df))),1),"% of records dropped")
 ```
 
+```{r}
+numericCols <- c("fare","tolls","extras","tips","trip_total","trip_seconds","trip_miles")
+meltData <- melt(dfClean[,numericCols])
+p <- ggplot(meltData, aes(factor(variable), value)) 
+p + geom_boxplot() + facet_wrap(~variable, scale="free") + theme(axis.title=element_text(size=14,face="bold"))
+```
 
 
 ```{r}
@@ -106,8 +116,6 @@ names(df)[names(df) == 'UNEMP'] <- 'UNEMP'
 df<- df %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(df)[names(df) == 'MEDINC'] <- 'MedIncome'
 ```
-
-
 
 ```{r}
 df$company[df$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
