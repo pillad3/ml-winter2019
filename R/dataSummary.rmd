@@ -67,7 +67,17 @@ summaryNA <- as.data.frame(sapply(df,function(x) sum(is.na(x)))/nrow(df)*100)
 #% of records that are zero in each column
 summaryZero <- as.data.frame(colSums(df==0,na.rm=TRUE)/nrow(df)*100)
 
+#Drop all NA records for the following columns
+naFilter<-c("fare","tolls","extras","tips","trip_total","trip_seconds","trip_miles","trip_end_timestamp","dropoff_community_area","pickup_community_area")
 
+dfClean<-df[complete.cases(df[,naFilter]),]
+
+#Drop records where miles, seconds, fare <=0
+dfClean<-dfClean[dfClean$trip_miles>0,]
+dfClean<-dfClean[dfClean$trip_seconds>0,]
+dfClean<-dfClean[dfClean$fare>0,]
+
+cat("After dropping NA and zero records: ", round(100*(1-(nrow(dfClean)/nrow(df))),1),"% of records dropped")
 ```
 
 
