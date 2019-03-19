@@ -156,7 +156,6 @@ dfClean2 %>% dplyr::group_by(company) %>% dplyr::summarize(percent_trips=round(1
 ccaData <- read.csv("ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
-ccaData$PercentUnemp<-as.factor(ccaData$PercentUnemp)
 #Look up name of pickup CCA and add to df
 dfClean2<- dfClean2 %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
 names(dfClean2)[names(dfClean2) == 'GEOG'] <- 'pickup_area'
@@ -194,12 +193,11 @@ For population: 0-10k, >10-20K, >20-30k, 30-50k, 50-75k, >75k
 For % MedInc: 0-25k, >25-40k, >40-55k, >55-70k, >70k
 For % Drive: 0-40%, >40-60%, >60-80%, >80%
 
-
 ```{r}
 #Assign factor levels for unemployment
 #Create new columns for factors
-dfClean2$PercentUnempPickupF <- dfClean2$PercentUnempPickup
-dfClean2$PercentUnempDropoffF <- dfClean2$PercentUnempDropoff 
+dfClean2$PercentUnempPickupF <- as.factor(dfClean2$PercentUnempPickup)
+dfClean2$PercentUnempDropoffF <- as.factor(dfClean2$PercentUnempDropoff)
 Thres1=5
 Thres2=10
 Thres3=15
@@ -227,14 +225,133 @@ for (i in 1:2){
   dfClean2[[colsToChange[i]]]=CurrentColumn                    #Plug-back to the data.frame
 }
 
-
+##Check out distribution of levels after assigned to data
 dfClean2 %>% dplyr::group_by(PercentUnempPickupF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
   mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
 dfClean2 %>% dplyr::group_by(PercentUnempDropoffF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
   mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
 ```
+Now add two new level-based factors for unemployment of dropoff and pickup locations
+```{r}
+#Assign factor levels for unemployment
+#Create new columns for factors
+dfClean2$Pop16PlusPickupF <- as.factor(dfClean2$Pop16PlusPickup)
+dfClean2$Pop16PlusDropoffF <- as.factor(dfClean2$Pop16PlusDropoff)
+Thres1=20000
+Thres2=50000
+Thres3=60000
+Thres4=70000
+Thres5=80000
+Thres6=90000
 
+colsToChange=c("Pop16PlusPickupF","Pop16PlusDropoffF")
 
+for (i in 1:2){
+  CurrentColumn=dfClean2[[colsToChange[i]]]                    #Extraction of column
+
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn))) 
+  levels(CurrentColumn)[CurrentColumn_Table$y<=Thres1]="0-20k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres1 & CurrentColumn_Table$y<=Thres2]=">20-50K"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres2 & CurrentColumn_Table$y<=Thres3]=">50-60k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres3 & CurrentColumn_Table$y<=Thres4]=">60-70k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres4 & CurrentColumn_Table$y<=Thres5]=">70-80k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres5 & CurrentColumn_Table$y<=Thres6]=">80-90k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres6]=">90k"
+
+  dfClean2[[colsToChange[i]]]=CurrentColumn                    #Plug-back to the data.frame
+}
+
+##Check out distribution of levels after assigned to data
+dfClean2 %>% dplyr::group_by(Pop16PlusPickupF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+dfClean2 %>% dplyr::group_by(Pop16PlusDropoffF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+```
+Now add two level-based factors for median income.
+```{r}
+#Assign factor levels for Median Income
+#Create new columns for factors
+dfClean2$MedIncomePickupF <- as.factor(dfClean2$MedIncomePickup)
+dfClean2$MedIncomeDropoffF <- as.factor(dfClean2$MedIncomeDropoff)
+Thres1=25000
+Thres2=40000
+Thres3=55000
+Thres4=70000
+Thres5=85000
+Thres6=100000
+
+colsToChange=c("MedIncomePickupF","MedIncomeDropoffF")
+
+for (i in 1:2){
+  CurrentColumn=dfClean2[[colsToChange[i]]]                    #Extraction of column
+
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn))) 
+  levels(CurrentColumn)[CurrentColumn_Table$y<=Thres1]="0-25k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres1 & CurrentColumn_Table$y<=Thres2]=">25-40K"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres2 & CurrentColumn_Table$y<=Thres3]=">40-55k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres3 & CurrentColumn_Table$y<=Thres4]=">55-70k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres4 & CurrentColumn_Table$y<=Thres5]=">70-85k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres5 & CurrentColumn_Table$y<=Thres6]=">85-100k"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres6]=">100k"
+
+  dfClean2[[colsToChange[i]]]=CurrentColumn                    #Plug-back to the data.frame
+}
+
+##Check out distribution of levels after assigned to data
+dfClean2 %>% dplyr::group_by(MedIncomePickupF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+dfClean2 %>% dplyr::group_by(MedIncomeDropoffF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+```
+
+Now add two level-based factors for percentage of commuters who drive.
+```{r}
+#Assign factor levels for percent of commuters who drive
+#Create new columns for factors
+dfClean2$PercentDrivePickupF <- as.factor(dfClean2$PercentDrivePickup)
+dfClean2$PercentDriveDropoffF <- as.factor(dfClean2$PercentDriveDropoff)
+Thres1=40
+Thres2=60
+Thres3=80
+Thres4=90
+Thres5=95
+Thres6=100
+
+colsToChange=c("PercentDrivePickupF","PercentDriveDropoffF")
+
+for (i in 1:2){
+  CurrentColumn=dfClean2[[colsToChange[i]]]                    #Extraction of column
+
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn))) 
+  levels(CurrentColumn)[CurrentColumn_Table$y<=Thres1]="0-40%"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres1 & CurrentColumn_Table$y<=Thres2]=">40-60%"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres2 & CurrentColumn_Table$y<=Thres3]=">60-80%"
+  CurrentColumn_Table=data.table(x=levels(CurrentColumn),y=as.numeric(levels(CurrentColumn)))
+  levels(CurrentColumn)[CurrentColumn_Table$y>Thres6]=">80%"
+
+  dfClean2[[colsToChange[i]]]=CurrentColumn                    #Plug-back to the data.frame
+}
+
+##Check out distribution of levels after assigned to data
+dfClean2 %>% dplyr::group_by(PercentDrivePickupF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+dfClean2 %>% dplyr::group_by(PercentDriveDropoffF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+```
 
 
 ```{r}
