@@ -199,43 +199,41 @@ For % Drive: 0-40%, >40-60%, >60-80%, >80%
 #Assign factor levels for unemployment
 #Create new columns for factors
 dfClean2$PercentUnempPickupF <- dfClean2$PercentUnempPickup
-dfClean2$PercentUnempDropoffF <- dfClean2$PercentUnempDropoff 
+dfClean2$PercentUnempDropoffF <- dfClean2$PercentUnempDropoff
 Thres1=5
 Thres2=10
 Thres3=15
 Thres4=20
 Thres5=25
 
+#levels(dfClean2$PercentUnempPickupF) <- c("0-5%",">5-10%",">10-15%",">15-20%",">20-25%",">25%")
+#levels(dfClean2$PercentUnempDropoffF) <- c("0-5%",">5-10%",">10-15%",">15-20%",">20-25%",">25%")
+
 colsToChange=c("PercentUnempPickupF","PercentUnempDropoffF")
 
 for (i in 1:2){
   CurrentColumn=dfClean2[[colsToChange[i]]]                    #Extraction of column
 
-  CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
-  levels(CurrentColumn)[CurrentColumn_Table<=Thres1]="0-5%"
+  levels(CurrentColumn)[as.numeric(CurrentColumn)<=Thres1]="0-5%"
 
-  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency 
-  levels(CurrentColumn)[CurrentColumn_Table>Thres1 & CurrentColumn_Table<=Thres2 ]=">5-10%"
+  levels(CurrentColumn)[as.numeric(CurrentColumn)>Thres1 & as.numeric(CurrentColumn)<=Thres2 ]=">5-10%"
 
-  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency
-  levels(CurrentColumn)[CurrentColumn_Table>Thres2 & CurrentColumn_Table<=Thres3 ]=">10-15%"
+  levels(CurrentColumn)[as.numeric(CurrentColumn)>Thres2 & as.numeric(CurrentColumn)<=Thres3 ]=">10-15%"
 
-  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency
-  levels(CurrentColumn)[CurrentColumn_Table>Thres3 & CurrentColumn_Table<=Thres4 ]=">15-20%"
+  levels(CurrentColumn)[as.numeric(CurrentColumn)>Thres3 & as.numeric(CurrentColumn)<=Thres4 ]=">15-20%"
 
-  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency
-  levels(CurrentColumn)[CurrentColumn_Table>Thres4 & CurrentColumn_Table<=Thres5 ]=">20-25%"
+  levels(CurrentColumn)[as.numeric(CurrentColumn)>Thres4 & as.numeric(CurrentColumn)<=Thres5 ]=">20-25%"
 
-  CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
-  levels(CurrentColumn)[CurrentColumn_Table>Thres5]=">25%"
+  levels(CurrentColumn)[as.numeric(CurrentColumn)>Thres5]=">25%"
 
   dfClean2[[colsToChange[i]]]=CurrentColumn                    #Plug-back to the data.frame
 }
 
-
-dfClean2 %>% dplyr::group_by(PercentUnempPickup) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+******Go back to hw4 code and add a table that matches factors to their numeric equivalent
+******
+dfClean2 %>% dplyr::group_by(PercentUnempPickupF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
   mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
-dfClean2 %>% dplyr::group_by(PercentUnempDropoff) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+dfClean2 %>% dplyr::group_by(PercentUnempDropoffF) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
   mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
 ```
 
