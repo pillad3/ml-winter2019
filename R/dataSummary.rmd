@@ -63,7 +63,6 @@ We need to compute some base stats for our initial dataset.
 
 ```{r caption="Data frame is now printed using `kable`.",render=lemon_print}
 
-knit_print.data.frame <- lemon_print
 #% of Records that are NA in each column
 summaryNA <- as.data.frame(sapply(df,function(x) sum(is.na(x)))/nrow(df)*100)
 #% of records that are zero in each column
@@ -82,7 +81,7 @@ dfClean<-dfClean[dfClean$trip_seconds>0,]
 dfClean<-dfClean[dfClean$fare>0,]
 dfClean<-dfClean[dfClean$trip_total>0,]
 
-cat("After dropping NA and zero records: ", round(100*(1-(nrow(dfClean)/nrow(df))),1),"% of records dropped")
+cat("After dropping NA and zero records: ", round(100*(1-(nrow(dfClean)/nrow(df))),2),"% of records dropped")
 ```
 
 ```{r}
@@ -109,16 +108,46 @@ We perform a final set of cuts to remove large outliers, or other nonsensical da
 
 ```{r}
 dfClean2 <- dfClean
+dim(dfClean2)
 dfClean2 <- dfClean2[dfClean2$fare>=3.25,]
+dim(dfClean2)
 dfClean2 <- dfClean2[dfClean2$trip_total>=3.25,]
+dim(dfClean2)
 dfClean2 <- dfClean2[dfClean2$fare<=225,]
+dim(dfClean2)
 dfClean2 <- dfClean2[dfClean2$extras<=225,]
+dim(dfClean2)
 dfClean2 <- dfClean2[dfClean2$trip_seconds>=30,]
+dim(dfClean2)
 dfClean2 <- dfClean2[dfClean2$trip_miles<=100,]
+dim(dfClean2)
 
 
-cat("After additional filtering ", round(100*(1-(nrow(dfClean2)/nrow(df))),1),"% of all records have been dropped")
+cat("After additional filtering ", round(100*(1-(nrow(dfClean2)/nrow(df))),2),"% of all records have been dropped")
 
+```
+```{r}
+#look at distribution of cab companies
+dfClean2 %>% dplyr::group_by(company) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+dfClean2$company <- fct_explicit_na(dfClean2$company,"NA")
+topCompany <- dfClean2 %>% dplyr::group_by(company) %>% tally(sort=TRUE)
+companyKeep <- topCompany[topCompany$n>(.001*nrow(dfClean2)),]
+#Add level for other companies with low frequency in data
+levels(dfClean2$company) <- c(levels(dfClean2$company),"Other")
+dfClean2$company[dfClean2$company] <- "Other"
+
+CurrentColumn=dfClean2$company 
+Thres_Low=floor(.001*nrow(dfClean2))
+CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
+levels(CurrentColumn)[CurrentColumn_Table<=Thres_Low]="Other"
+dfClean2$company=CurrentColumn 
+droplevels(dfClean2$company)
+
+##Generate a distribtion after adding our new level
+
+dfClean2 %>% dplyr::group_by(company) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
 ```
 
 
@@ -127,48 +156,102 @@ cat("After additional filtering ", round(100*(1-(nrow(dfClean2)/nrow(df))),1),"%
 ccaData <- read.csv("ChicagoCCAData.csv")
 ccaData$CCA.Code<-as.factor(ccaData$CCA.Code)
 ccaData$GEOG<-as.factor(ccaData$GEOG)
+ccaData$PercentUnemp<-as.factor(ccaData$PercentUnemp)
 #Look up name of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
-names(df)[names(df) == 'GEOG'] <- 'pickup_area'
-#Look up name of dropoff CCA and add to df
-df<- df %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
-names(df)[names(df) == 'GEOG'] <- 'dropoff_area'
-#Look up population>16yo of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,POP_16OV,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
-names(df)[names(df) == 'POP_16OV'] <- 'Pop16Plus'
-#Look up Labor Force of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,IN_LBFRC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
-names(df)[names(df) == 'IN_LBFRC'] <- 'IN_LBFRC'
-#Look up Unemp of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,UNEMP,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
-names(df)[names(df) == 'UNEMP'] <- 'UNEMP'
-#Look up Unemp of pickup CCA and add to df
-df<- df %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
-names(df)[names(df) == 'MEDINC'] <- 'MedIncome'
+dfClean2<- dfClean2 %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'GEOG'] <- 'pickup_area'
+#Look up name of dropoff CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,GEOG,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'GEOG'] <- 'dropoff_area'
+#Look up population>16yo of pickup CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,POP_16OV,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'POP_16OV'] <- 'Pop16PlusPickup'
+#Look up population>16yo of dropoff CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,POP_16OV,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'POP_16OV'] <- 'Pop16PlusDropoff'
+#Look up Unemp of pickup CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'MEDINC'] <- 'MedIncomePickup'
+#Look up Unemp of dropoff CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,MEDINC,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'MEDINC'] <- 'MedIncomeDropoff'
+#Look up %Commuters who drive of pickup CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,PercentDrive,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'PercentDrive'] <- 'PercentDrivePickup'
+#Look up %Commuters who drive of dropoff CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,PercentDrive,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'PercentDrive'] <- 'PercentDriveDropoff'
+#Look up % Unemp of pickup CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,PercentUnemp,CCA.Code),by=c("pickup_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'PercentUnemp'] <- 'PercentUnempPickup'
+#Look up % Unemp of dropoff CCA and add to dfClean2
+dfClean2<- dfClean2 %>% left_join(select(ccaData,PercentUnemp,CCA.Code),by=c("dropoff_community_area"="CCA.Code"))
+names(dfClean2)[names(dfClean2) == 'PercentUnemp'] <- 'PercentUnempDropoff'
 ```
+Add levels for new factors:
+For our two unemp vectors: 0-5%,>5-10%,>10-15%,>15-20%,>20-25%, >25%
+For population: 0-10k, >10-20K, >20-30k, 30-50k, 50-75k, >75k
+For % MedInc: 0-25k, >25-40k, >40-55k, >55-70k, >70k
+For % Drive: 0-40%, >40-60%, >60-80%, >80%
+
 
 ```{r}
-df$company[df$company=="Chicago Elite Cab Corp. (Chicago Carriag"] <- "Chicago Elite Cab Corp."
-df$startDate <- date(df$trip_start_timestamp)
-df$endDate <- date(df$trip_end_timestamp)
-df$endDay <- wday(df$trip_end_timestamp,label=TRUE)
-df$endMonth <- month(df$trip_end_timestamp,label=TRUE)
-df$endHour <- hour(str_replace(df$trip_end_timestamp,"T"," "))
+#Assign factor levels for unemployment
+#Create new columns for factors
+
+dfClean2$percentUnempPickup <- as.factor(dfClean2$percentUnempPickup)
+dfClean2$percentUnempDropoff <- as.factor(dfClean2$percentUnempDropoff)
+
+Thres1=5
+Thres2=10
+Thres3=15
+Thres4=20
+Thres5=25
+
+colsToChange=c("PercentUnempPickup","PercentUnemDropoff")
+
+for (i in 1:2){
+  CurrentColumn=dfClean2[colsToChange[i]]                    #Extraction of column
+
+  CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
+  levels(CurrentColumn)[CurrentColumn_Table<=Thres1]="0-5%"
+
+  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency 
+  levels(CurrentColumn)[CurrentColumn_Table>Thres1 & CurrentColumn_Table<=Thres2 ]=">5-10%"
+
+  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency
+  levels(CurrentColumn)[CurrentColumn_Table>Thres2 & CurrentColumn_Table<=Thres3 ]=">10-15%"
+
+  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency
+  levels(CurrentColumn)[CurrentColumn_Table>Thres3 & CurrentColumn_Table<=Thres4 ]=">15-20%"
+
+  CurrentColumn_Table=table(CurrentColumn) #Tabulate the new frequency
+  levels(CurrentColumn)[CurrentColumn_Table>Thres4 & CurrentColumn_Table<=Thres5 ]=">20-25%"
+
+  CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
+  levels(CurrentColumn)[CurrentColumn_Table>Thres5]=">25%"
+
+  dfClean2[colsToChange[i]]=CurrentColumn                    #Plug-back to the data.frame
+}
+
+
+
+
+dfClean2 %>% dplyr::group_by(company) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
+
+
 ```
 
-Throw out all rows where fare, duration, or distance=0 and where NAs exist for dropoff/pickup location and convert NA to explicit for company (necessary in summary calcs)
+
+
 
 ```{r}
-#Uncomment the following line to drop all records where dropoff_area and pickup_area NA
-#df<-df %>% drop_na(c("dropoff_area","pickup_area"))
-#Replace <NA> with string "NA" which can be used for grouping
-nrowPreFilter=nrow(df)
-df <- df[df$fare>0,]
-df <- df[df$trip_miles>0,]
-df <- df[df$trip_seconds>0,]
-df <- df[df$trip_total>0,]
-df$company <- fct_explicit_na(df$company,"NA")
-
-cat("Filtering out records where fare,trip_miles,trip_seconds=0. Remaining records: ", round(100*nrow(df)/nrowPreFilter,1),"% of data. Leaves ", nrow(df)," total records.")
+dfClean2$startDate <- date(dfClean2$trip_start_timestamp)
+dfClean2$endDate <- date(dfClean2$trip_end_timestamp)
+dfClean2$startDay <- wday(dfClean2$trip_start_timestamp,label=TRUE)
+dfClean2$startMonth <- month(dfClean2$trip_start_timestamp,label=TRUE)
+dfClean2$startHour <- hour(str_replace(dfClean2$trip_start_timestamp,"T"," "))
 ```
+
 
