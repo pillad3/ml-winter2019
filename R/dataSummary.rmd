@@ -198,20 +198,18 @@ For % Drive: 0-40%, >40-60%, >60-80%, >80%
 ```{r}
 #Assign factor levels for unemployment
 #Create new columns for factors
-
-dfClean2$percentUnempPickup <- as.factor(dfClean2$percentUnempPickup)
-dfClean2$percentUnempDropoff <- as.factor(dfClean2$percentUnempDropoff)
-
+dfClean2$PercentUnempPickupF <- dfClean2$PercentUnempPickup
+dfClean2$PercentUnempDropoffF <- dfClean2$PercentUnempDropoff 
 Thres1=5
 Thres2=10
 Thres3=15
 Thres4=20
 Thres5=25
 
-colsToChange=c("PercentUnempPickup","PercentUnemDropoff")
+colsToChange=c("PercentUnempPickupF","PercentUnempDropoffF")
 
 for (i in 1:2){
-  CurrentColumn=dfClean2[colsToChange[i]]                    #Extraction of column
+  CurrentColumn=dfClean2[[colsToChange[i]]]                    #Extraction of column
 
   CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
   levels(CurrentColumn)[CurrentColumn_Table<=Thres1]="0-5%"
@@ -231,16 +229,14 @@ for (i in 1:2){
   CurrentColumn_Table=table(CurrentColumn) #Tabulate the frequency
   levels(CurrentColumn)[CurrentColumn_Table>Thres5]=">25%"
 
-  dfClean2[colsToChange[i]]=CurrentColumn                    #Plug-back to the data.frame
+  dfClean2[[colsToChange[i]]]=CurrentColumn                    #Plug-back to the data.frame
 }
 
 
-
-
-dfClean2 %>% dplyr::group_by(company) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+dfClean2 %>% dplyr::group_by(PercentUnempPickup) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
   mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
-
-
+dfClean2 %>% dplyr::group_by(PercentUnempDropoff) %>% dplyr::summarize(percent_trips=round(100*n()/nrow(dfClean2),5),
+  mean_fare = round(mean(fare,na.rm=TRUE),2) )%>% arrange(desc(percent_trips))
 ```
 
 
