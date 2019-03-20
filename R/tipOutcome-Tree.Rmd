@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r,echo=FALSE,results='hide', message=FALSE}
 # Packages and Data Parser
 #Note: Be sure plyr is loaded before dplyr
-PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm","rattle")
+PackageList =c("plyr","dplyr","tidyverse","lubridate","censusapi","forcats","rpart","rpart.plot","tictoc","gbm","rattle","data.table","glmnet")
 NewPackages=PackageList[!(PackageList %in% 
                             installed.packages()[,"Package"])]
 if(length(NewPackages)) install.packages(NewPackages,repos = "http://cran.us.r-project.org")
@@ -67,22 +67,25 @@ dfClean2$dropoff_area_group <- as.factor(ifelse(!dfClean2$dropoff_area %in% topD
 levels(dfClean2$dropoff_area_group)<-c(levels(topDropoff05Perc$dropoff_area),"Other")
 
 #Filter on the following columns--drop all rows where NA encountered in any column
-colFilter <- c("company","payment_type","dropoff_area_group","tips","startDay","startMonth","startHour","pickup_area_group","fare","trip_total","trip_seconds","PercentDrivePickupF","PercentDriveDropoffF","MedIncomePickupF","MedIncomeDropoffF","Pop16PlusPickupF","Pop16PlusDropoffF","PercentUnempPickupF","PercentUnempDropoffF","hourlyRate","avgMPH","tipOutcome")
+colFilter <- c("company","payment_type","dropoff_area_group","pickup_area_group","startDay","startMonth","trip_total","trip_seconds","trip_miles","MedIncomePickupF","MedIncomeDropoffF","PercentUnempPickupF","PercentUnempDropoffF","tipOutcome")
 
-dfSlim <- dfClean2[colFilter] %>% drop_na()
+dfSlim <- dfClean2[colFilter] 
+
+
 #A few columns that won't enter the model
-toDrop <- c("tips")
-dfSlim <- dfSlim[,-which(names(dfSlim) %in% toDrop)]
+#toDrop <- c("tips")
+#dfSlim <- dfSlim[,-which(names(dfSlim) %in% toDrop)]
 
 cat("Filtering NA records left ", round(100*nrow(dfSlim)/nrow(df),1),"% of data. Dropping original dataframe. Leaves ", nrow(dfSlim)," total records.")
-#rm(df)
-#gc()
+rm(df)
+rm(dfClean)
+gc()
 ```
 
 ```{r}
 #Drop any row containing NA in any column
-dfTree <- dfSlim
-dfTree <- dfTree[complete.cases(dfTree),]
+
+dfTree <- dfSlim[1:500000,]
 
 nSample <- floor(0.75*nrow(dfTree))
 train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
@@ -97,13 +100,40 @@ Let's measure RMSE using the same training and validation data sets for a linaer
 ```{r, "Logistic Regression - fare"}
 phatT=list()
 phatV=list()
-subsetTrain=1000000
-subsetValidate=200000
 
-phatT$logist = matrix(0.0,nrow(trainSample[1:subsetTrain,]),1)
-phatV$logist = matrix(0.0,nrow(validateSample[1:subsetValidate,]),1)
+vars_name <- trainSample[,-which(names(trainSample) %in% c("tipOutcome"))] %>% 
+  select_if(function(col) is.factor(col) | is.numeric(col)) %>% 
+  colnames() %>% 
+  str_c(collapse = "+") 
+model_string <- paste("tipOutcome  ~",vars_name )
+
+phatT$logist = matrix(0.0,nrow(trainSample),1)
+phatV$logist = matrix(0.0,nrow(validateSample),1)
+
+x_train <- model.matrix(as.formula(model_string), trainSample)
+
+lasso_cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tipOutcome), family = "binomial", alpha=1, standardize=TRUE, nfolds=10)
+
+#View a plot of the lasso cross validation curve as a function of lambda
+plot(lasso_cv)
+predict(lasso_cv,type="coefficients")
+lassoT <- predict(lasso_cv,trainSample[,-which(names(trainSample) %in% c("tipOutcome"))],lasso_cv$ambda.1se)
+lassoV <- predict(lasso_cv,validateSample[,-which(names(validateSample) %in% c("tipOutcome"))],lasso_cv$ambda.1se)
+
+
+##Plot important variables
+c<-coef(lasso_cv,s='lambda.1se',exact=TRUE)
+inds<-which(c!=0)
+variables<-row.names(c)[inds]
+betas<-c[inds]
+cbind(variables,round(betas,6))
+
+
+plot(lasso)
+plot(lasso, xvar = "lambda", label = TRUE)
+
 #logistic regression, y=FALSE and model=FALSE to save memory
-lgfit = glm(tipOutcome~.,trainSample[1:subsetTrain,],family="binomial",y=FALSE,model=TRUE)?pre
+#lgfit = glm(tipOutcome~.,trainSample[1:subsetTrain,],family="binomial",y=FALSE,model=TRUE)?pre
 
 phatT$logist = predict(lgfit, trainSample, type="response")
 phatV$logist = predict(lgfit, validateSample, type="response")
@@ -116,6 +146,41 @@ cat("\nLinear Regression Training error: $",round(errorTrain,2))
 cat("\nLinear Regression Validation error: $",round(errorValidate,2))
 
 ```
+
+
+
+```{r, "Lasso Tips"}
+library(dplyr)
+
+vars_name <- trainSample[,-which(names(trainSample) %in% c("tipOutcome",))] %>% 
+  select_if(function(col) is.factor(col) | is.numeric(col)) %>% 
+  colnames() %>% 
+  str_c(collapse = "+") 
+model_string <- paste("tips  ~",vars_name )
+
+x_train <- model.matrix(as.formula(model_string), trainSample)
+
+lasso_cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "binomial", alpha=1, standardize=TRUE, nfolds=10)
+plot(lasso_cv)
+```
+
+
+lasso <- glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "binomial", alpha=1, standardize=TRUE,intercept = TRUE)
+
+
+c<-coef(lasso_cv,s='lambda.1se',exact=TRUE)
+inds<-which(c!=0)
+variables<-row.names(c)[inds]
+betas<-c[inds]
+cbind(variables,round(betas,6))
+
+plot(lasso)
+plot(lasso, xvar = "lambda", label = TRUE)
+
+```
+
+
+
 # Trees
 
 One hypothesis is that there are different subsets of riders which we may be able to identify based upon:

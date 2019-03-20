@@ -259,3 +259,7 @@ dfClean2$startHour <- lubridate::hour(str_replace(dfClean2$trip_start_timestamp,
 dfClean2$hourlyRate<-dfClean2$trip_total/(dfClean2$trip_seconds/(60*60))
 dfClean2$avgMPH<-dfClean2$trip_miles/(dfClean2$trip_seconds/(60*60))
 dfClean2$tipOutcome<-ifelse(dfClean2$tips>0,1,0)
+
+dfClean2$startDay<-factor(dfClean2$startDay,ordered=FALSE)
+dfClean2$startMonth<-factor(dfClean2$startMonth,ordered=FALSE)
+dfClean2$startHour<-as.factor(dfClean2$startHour)
