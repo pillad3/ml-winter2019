@@ -85,7 +85,7 @@ gc()
 ```{r}
 #Drop any row containing NA in any column
 
-dfTree <- dfSlim[1:500000,]
+dfTree <- dfSlim[1:1000000,]
 
 nSample <- floor(0.75*nrow(dfTree))
 train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
@@ -128,34 +128,30 @@ plot(lasso_cv)
 predict(lasso_cv,type="coefficients")
 
 #Calculate probability of tip
-lassoT <- predict(lasso_cv,x_train,s=lasso_cv$lambda.1se, type="response")
-lassoV <- predict(lasso_cv,x_validate,s=lasso_cv$lambda.1se, type="response")
+phatT$lasso <- predict(lasso_cv,x_train,s=lasso_cv$lambda.1se, type="response")
+phatV$lasso <- predict(lasso_cv,x_validate,s=lasso_cv$lambda.1se, type="response")
 
 #Calculatemisclassifciation error
-
-
-
-
+#Threshold for classifying as 1
+thresh<-0.5
+phatT$lasso <- ifelse(phatT$lasso>thresh,1,0)
+phatV$lasso <- ifelse(phatV$lasso>thresh,1,0)
 
 plot(lasso)
 plot(lasso, xvar = "lambda", label = TRUE)
 
-#logistic regression, y=FALSE and model=FALSE to save memory
-#lgfit = glm(tipOutcome~.,trainSample[1:subsetTrain,],family="binomial",y=FALSE,model=TRUE)?pre
+#Calculate misclassification error
 
-phatT$logist = predict(lgfit, trainSample, type="response")
-phatV$logist = predict(lgfit, validateSample, type="response")
+errorTrain = sqrt(mean((phatT$lasso-trainSample$tipOutcome)^2))
+errorValidate = sqrt(mean((phatV$lasso-validateSample$tipOutcome)^2))
+misclassTrain = sum(ifelse(phatT$lasso==trainSample$tipOutcome,0,1))/nrow(trainSample)
+misclassValidate = sum(ifelse(phatV$lasso==validateSample$tipOutcome,0,1))/nrow(trainSample)
 
-errorTrain = sqrt(mean((phatT$logist-trainSample$dollarsPerHour)^2))
-errorValidate = sqrt(mean((phatV$logist-validateSample$dollarsPerHour)^2))
-
-cat("Avg trip total per min: $",round(mean(dfSlim$dollarsPerHour),2))
-cat("\nLinear Regression Training error: $",round(errorTrain,2))
-cat("\nLinear Regression Validation error: $",round(errorValidate,2))
-
+cat("\nLasso Regression Training Misclass Error: ",round(misclassTrain,4))
+cat("\nLasso Regression Validation Misclass Error: ",round(misclassValidate,4))
+cat("\nLasso Regression Training RSSE: ",round(errorTrain,4))
+cat("\nLasso Regression Validation RMSE: ",round(errorValidate,4))
 ```
-
-
 
 ```{r, "Lasso Tips"}
 library(dplyr)
