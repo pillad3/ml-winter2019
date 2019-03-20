@@ -111,15 +111,9 @@ phatT$logist = matrix(0.0,nrow(trainSample),1)
 phatV$logist = matrix(0.0,nrow(validateSample),1)
 
 x_train <- model.matrix(as.formula(model_string), trainSample)
+x_validate <- model.matrix(as.formula(model_string), validateSample)
 
 lasso_cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tipOutcome), family = "binomial", alpha=1, standardize=TRUE, nfolds=10)
-
-#View a plot of the lasso cross validation curve as a function of lambda
-plot(lasso_cv)
-predict(lasso_cv,type="coefficients")
-lassoT <- predict(lasso_cv,trainSample[,-which(names(trainSample) %in% c("tipOutcome"))],lasso_cv$ambda.1se)
-lassoV <- predict(lasso_cv,validateSample[,-which(names(validateSample) %in% c("tipOutcome"))],lasso_cv$ambda.1se)
-
 
 ##Plot important variables
 c<-coef(lasso_cv,s='lambda.1se',exact=TRUE)
@@ -127,6 +121,20 @@ inds<-which(c!=0)
 variables<-row.names(c)[inds]
 betas<-c[inds]
 cbind(variables,round(betas,6))
+
+#View a plot of the lasso cross validation curve as a function of lambda
+plot(lasso_cv)
+#Show coefficents (all)
+predict(lasso_cv,type="coefficients")
+
+#Calculate probability of tip
+lassoT <- predict(lasso_cv,x_train,s=lasso_cv$lambda.1se, type="response")
+lassoV <- predict(lasso_cv,x_validate,s=lasso_cv$lambda.1se, type="response")
+
+#Calculatemisclassifciation error
+
+
+
 
 
 plot(lasso)
