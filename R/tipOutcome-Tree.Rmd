@@ -37,6 +37,43 @@ lapply(PackageList,require,character.only=TRUE)#array function
 options(tibble.print_max = Inf, tibble.print_min = 20) 
 set.seed(1) #Always set the seed for reproducibility
 ```
+#Define helper functions
+```{r}
+# deviance loss function
+# y should be 0/1
+# phat are probabilities obtain by our algorithm
+# wht shrinks probs in phat towards .5 --- this helps avoid numerical problems don’t use log(0)!
+lossf = function(y,phat,wht=0.0000001) {
+if(is.factor(y)) y = as.numeric(y)-1
+phat = (1-wht)*phat + wht*.5 #For numerical reason, we can not do log(0)
+py = ifelse(y==1, phat, 1-phat)
+return(-2*sum(log(py)))
+}
+
+# confusion matrix
+# y should be 0/1
+# phat are probabilities obtain by our algorithm
+# thr is the cut off value - everything above thr is classified as 1
+getConfusionMatrix = function(y,phat,thr=0.5) {
+if(is.factor(y)) y = as.numeric(y)-1
+yhat = ifelse(phat > thr, 1, 0)
+tb = table(predictions = yhat,
+actual = y)
+rownames(tb) = c("predict_0", "predict_1")
+return(tb)
+}
+
+# deviance loss function
+# y should be 0/1
+# phat are probabilities obtain by our algorithm
+# thr is the cut off value - everything above thr is classified as 1
+lossMR = function(y,phat,thr=0.5) {
+if(is.factor(y)) y = as.numeric(y)-1
+yhat = ifelse(phat > thr, 1, 0)
+return(1 - mean(yhat == y))
+}
+```
+
 
 Load data and begin generating exploratory plots.
 
@@ -84,9 +121,8 @@ gc()
 
 ```{r}
 #Drop any row containing NA in any column
-
 dfTree <- dfSlim[1:1000000,]
-
+dfTest <- dfSlim[(dim(dfTree)[1]+1):(dim(dfTree)[1]+500000),]
 nSample <- floor(0.75*nrow(dfTree))
 train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
 
@@ -95,20 +131,41 @@ validateSample <- dfTree[-train_ind,]
 ```
 # Regression
 
-Let's measure RMSE using the same training and validation data sets for a linaer regression model.
+Let's measure RMSE using the same training and validation data sets for a linaer regression model. The first question we want to ask is what the baseline rate of tipping is across the entire dataset.
+```{r}
+cat("The rate of tipping within the dataset is: ", round(sum(dfSlim$tipOutcome)/nrow(dfSlim)*100,2),"%")
+```
 
+The first approach to investigate is a logistic regression for binomial classification:
 ```{r, "Logistic Regression - fare"}
 phatT=list()
 phatV=list()
+#First logistic regression for binomial classification
+lgfit = glm(tipOutcome~., trainSample, family=binomial(link = "logit"))
 
+tempT = predict(lgfit, trainSample, type="response")
+tempV = predict(lgfit, validateSample, type="response")
+
+phatT$logit = matrix(tempT,ncol=1)
+phatV$logit = matrix(tempV,ncol=1)
+
+getConfusionMatrix(trainSample$tipOutcome, phatT[[1]][,1], 0.5)
+cat("Training missclassification rate = ", round(100*lossMR(trainSample$tipOutcome, phatT[[1]][,1], 0.5),2), "%\n")
+getConfusionMatrix(validateSample$tipOutcome, phatV[[1]][,1], 0.5)
+cat("Validation missclassification rate = ", round(100*lossMR(validateSample$tipOutcome, phatV[[1]][,1], 0.5),2), "%\n")
+
+```
+
+The logistic model gives a relatively low misclassification rate but we are given the relative sensitivity of the output to each model factor level, a large number of co-variates. Next we would like to investigate the use of a lasso for variable reduction. This will reduce the dimensionality of the problem such that the final model only includes the most significant drivers of the tip outcome. These factors that remain will tell us the most significant indicators of whether or not a given trip will result in a tip.
+```{r}
 vars_name <- trainSample[,-which(names(trainSample) %in% c("tipOutcome"))] %>% 
   select_if(function(col) is.factor(col) | is.numeric(col)) %>% 
   colnames() %>% 
   str_c(collapse = "+") 
 model_string <- paste("tipOutcome  ~",vars_name )
 
-phatT$logist = matrix(0.0,nrow(trainSample),1)
-phatV$logist = matrix(0.0,nrow(validateSample),1)
+phatT$lasso = matrix(0.0,nrow(trainSample),1)
+phatV$lasso = matrix(0.0,nrow(validateSample),1)
 
 x_train <- model.matrix(as.formula(model_string), trainSample)
 x_validate <- model.matrix(as.formula(model_string), validateSample)
@@ -125,7 +182,7 @@ cbind(variables,round(betas,6))
 #View a plot of the lasso cross validation curve as a function of lambda
 plot(lasso_cv)
 #Show coefficents (all)
-predict(lasso_cv,type="coefficients")
+lasso=predict(lasso_cv,type="coefficients")
 
 #Calculate probability of tip
 phatT$lasso <- predict(lasso_cv,x_train,s=lasso_cv$lambda.1se, type="response")
@@ -133,24 +190,32 @@ phatV$lasso <- predict(lasso_cv,x_validate,s=lasso_cv$lambda.1se, type="response
 
 #Calculatemisclassifciation error
 #Threshold for classifying as 1
-thresh<-0.5
-phatT$lasso <- ifelse(phatT$lasso>thresh,1,0)
-phatV$lasso <- ifelse(phatV$lasso>thresh,1,0)
 
-plot(lasso)
-plot(lasso, xvar = "lambda", label = TRUE)
+getConfusionMatrix(trainSample$tipOutcome, phatT[[2]][,1], 0.5)
+cat("Training missclassification rate = ", round(100*lossMR(trainSample$tipOutcome, phatT[[2]][,1], 0.5),2), "%\n")
+getConfusionMatrix(validateSample$tipOutcome, phatV[[2]][,1], 0.5)
+cat("Validation missclassification rate = ", round(100*lossMR(validateSample$tipOutcome, phatV[[2]][,1], 0.5),2), "%\n")
 
-#Calculate misclassification error
+lossL = list()
+phatL=phatT
+nmethod = length(phatL)
+for(i in 1:nmethod) {
+nrun = ncol(phatL[[i]])
+lvec = rep(0,nrun)
+for(j in 1:nrun) lvec[j] = lossf(validateSample$tipOutcome, phatL[[i]][,j])
+lossL[[i]]=lvec; names(lossL)[i] = names(phatL)[i]
+}
+lossv = unlist(lossL)
+plot(lossv, ylab="loss on Test", type="n")
+nloss=0
+for(i in 1:nmethod) {
+ii = nloss + 1:ncol(phatL[[i]])
+points(ii,lossv[ii],col=i,pch=17)
+nloss = nloss + ncol(phatL[[i]])
+}
+legend("topright",legend=names(phatL),col=1:nmethod,pch=rep(17,nmethod))
 
-errorTrain = sqrt(mean((phatT$lasso-trainSample$tipOutcome)^2))
-errorValidate = sqrt(mean((phatV$lasso-validateSample$tipOutcome)^2))
-misclassTrain = sum(ifelse(phatT$lasso==trainSample$tipOutcome,0,1))/nrow(trainSample)
-misclassValidate = sum(ifelse(phatV$lasso==validateSample$tipOutcome,0,1))/nrow(trainSample)
 
-cat("\nLasso Regression Training Misclass Error: ",round(misclassTrain,4))
-cat("\nLasso Regression Validation Misclass Error: ",round(misclassValidate,4))
-cat("\nLasso Regression Training RSSE: ",round(errorTrain,4))
-cat("\nLasso Regression Validation RMSE: ",round(errorValidate,4))
 ```
 
 ```{r, "Lasso Tips"}
@@ -168,38 +233,50 @@ lasso_cv <- cv.glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "binom
 plot(lasso_cv)
 ```
 
+#########
+# Trees
 
-lasso <- glmnet(x=x_train,y = as.matrix(trainSample$tips), family = "binomial", alpha=1, standardize=TRUE,intercept = TRUE)
+We will now use trees to identify characteristics of rides with average earnings rates with more than 1 sd above average. The mean and standard deviation of total fare are given by:
+```{r}
+#Filter on the following columns--drop all rows where NA encountered in any column
+colFilter <- c("company","payment_type","dropoff_area_group","pickup_area_group","startDay","startMonth","trip_total","trip_seconds","trip_miles","MedIncomePickupF","MedIncomeDropoffF","PercentUnempPickupF","PercentUnempDropoffF","tipOutcome","hourlyRate")
+
+dfSlim <- dfClean2[colFilter]
+```
+Plot box plot of hour fare
 
 
-c<-coef(lasso_cv,s='lambda.1se',exact=TRUE)
-inds<-which(c!=0)
-variables<-row.names(c)[inds]
-betas<-c[inds]
-cbind(variables,round(betas,6))
-
-plot(lasso)
-plot(lasso, xvar = "lambda", label = TRUE)
-
+```{r}
+boxplot(hourlyRate~pickup_area_group, data=dfSlim[1:1000000,],ylim=c(0,400),)
 ```
 
 
-
-# Trees
-
-One hypothesis is that there are different subsets of riders which we may be able to identify based upon:
-* pickup location
-* dropoff location
-* pickup area demographic attributes
-* time of ride
-* day of ride
-
-We will use tree-based models to model trip total per minute
-
-
-We will construct a big tree to start.
 ```{r}
-big_tree = rpart(tipOutcome~., data=trainSample[1:subsetTrain,], control=rpart.control(minsplit=50,cp=0.00001,xval=10))
+meanFare <- mean(3600*dfSlim$trip_total/dfSlim$trip_seconds)
+sdFare <- sd(3600*dfSlim$trip_total/dfSlim$trip_seconds)
+cat("Average earning rate: ", mean(3600*dfSlim$trip_total/dfSlim$trip_seconds) )
+```
+We will add a column called hourlyOutcome which will include a binomial indicator to indicate whether the hourlyRate for a ride is greater than the meanHourlyRate by at least 1 stdev.
+
+```{r}
+dfSlim$hourlyOutcome=ifelse(dfSlim$hourlyRate>(meanFare+sdFare),1,0)
+colFilter <- c("company","payment_type","dropoff_area_group","pickup_area_group","startDay","startMonth","trip_total","trip_seconds","trip_miles","MedIncomePickupF","MedIncomeDropoffF","PercentUnempPickupF","PercentUnempDropoffF","hourlyOutcome")
+
+#Filter further
+dfSlim <- dfSlim[colFilter]
+
+dfTree <- dfSlim[1:1000000,]
+dfTest <- dfSlim[(dim(dfTree)[1]+1):(dim(dfTree)[1]+500000),]
+nSample <- floor(0.75*nrow(dfTree))
+train_ind <- sample(seq_len(nrow(dfTree)), size = nSample)
+
+trainSample <- dfTree[train_ind,] #drop the final redundant dummy var for target_control
+validateSample <- dfTree[-train_ind,]
+```
+
+
+```{r}
+big_tree = rpart(hourlyOutcome~., data=trainSample, control=rpart.control(minsplit=50,cp=0.00001,xval=10))
 nbig = length(unique(big_tree$where)) 
 
 cat('size of big tree: ',nbig,'\n')
@@ -222,8 +299,8 @@ cpvec = big_tree$cptable[,"CP"]
 ntree = length(cpvec)
 tree_size = rep(0,ntree)
 
-phatT$logist = matrix(0.0,nrow(trainSample),ntree)
-phatV$logist = matrix(0.0,nrow(validateSample),ntree)
+phatT$tree = matrix(0.0,nrow(trainSample),ntree)
+phatV$tree = matrix(0.0,nrow(validateSample),ntree)
 
 errorTrain=rep(0,ntree)
 errorValidate=rep(0,ntree)
@@ -232,12 +309,26 @@ for(i in 1:ntree) {
   temptree = prune(big_tree,cp=cpvec[i])
   tree_size[i] = length(unique(temptree$where))
  
-  phatT$logist = predict(temptree,newdata=trainSample)
-  phatV$logist = predict(temptree,newdata=validateSample)
+  phatT$tree = predict(temptree,newdata=trainSample)
+  phatV$tree = predict(temptree,newdata=validateSample)
   
   errorTrain[i]=sqrt(mean((phatT$logist - trainSample$dollarsPerHour)^2))
   errorValidate[i]=sqrt(mean((phatV$logist - validateSample$dollarsPerHour)^2))
 }
+
+
+
+#Calculatemisclassifciation error
+#Threshold for classifying as 1
+
+getConfusionMatrix(trainSample$hourlyOutcome, phatT$tree, 0.5)
+cat("Training missclassification rate = ", round(100*lossMR(trainSample$hourlyOutcome, phatT$tree, 0.5),2), "%\n")
+getConfusionMatrix(validateSample$hourlyOutcome, phatV$tree, 0.5)
+cat("Validation missclassification rate = ", round(100*lossMR(validateSample$hourlyOutcome, phatV$tree, 0.5),2), "%\n")
+
+
+
+
 
 ggplot()+geom_line(aes(x=tree_size,y=errorValidate, color="validate"),size=1) +  geom_line(aes(x=tree_size,y=errorTrain,color="train"))+  scale_colour_manual(breaks = c("Validate"="blue", "Train"="green"),values = c("blue", "green")) + ggtitle("Tree Performance")+xlab("Tree Size")+ylab("RMSE")
 
